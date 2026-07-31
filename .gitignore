@@ -25,3 +25,12 @@ Thumbs.db
 coverage/
 playwright-report/
 test-results/
+
+# Database (SQLite lokal)
+prisma/dev.db*
+
+# Upload file lokal (mock storage)
+.data/
+
+# TypeScript
+*.tsbuildinfo
