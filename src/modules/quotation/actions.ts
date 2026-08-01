@@ -11,6 +11,7 @@ import { withRevision } from "./lib/quotation-number";
 import {
   createQuotation,
   deleteQuotation,
+  duplicateQuotation,
   getQuotation,
   issueQuotation,
   QuotationError,
@@ -89,6 +90,19 @@ export async function revisiPenawaranAction(
     return { ok: true, data: { id: clone.id } };
   } catch (e) {
     return { ok: false, error: errMessage(e, "Gagal membuat revisi.") };
+  }
+}
+
+export async function duplikatPenawaranAction(
+  id: string,
+): Promise<ActionResult<{ id: string }>> {
+  try {
+    const ctx = await requireOrgContext();
+    const clone = await duplicateQuotation(ctx, ctx.userId, id);
+    revalidatePath("/app/penawaran");
+    return { ok: true, data: { id: clone.id } };
+  } catch (e) {
+    return { ok: false, error: errMessage(e, "Gagal menduplikasi penawaran.") };
   }
 }
 

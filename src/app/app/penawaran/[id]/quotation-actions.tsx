@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Copy,
+  CopyPlus,
   FileEdit,
   GitBranchPlus,
   MessageCircle,
@@ -18,6 +19,7 @@ import {
 import { toast } from "sonner";
 import { toWaNumber } from "@/lib/format";
 import {
+  duplikatPenawaranAction,
   hapusPenawaranAction,
   revisiPenawaranAction,
   setStatusPenawaranAction,
@@ -217,6 +219,26 @@ export function QuotationActions({ quotation }: { quotation: QuotationActionsDat
             >
               <GitBranchPlus data-icon="inline-start" />
               Buat revisi
+            </Button>
+
+            <Button
+              variant="outline"
+              disabled={pending}
+              onClick={() =>
+                startTransition(async () => {
+                  const result = await duplikatPenawaranAction(quotation.id);
+                  if (result.ok && result.data) {
+                    toast.success("Penawaran diduplikasi sebagai draft baru.");
+                    router.push(`/app/penawaran/${result.data.id}/edit`);
+                    router.refresh();
+                  } else if (!result.ok) {
+                    toast.error(result.error);
+                  }
+                })
+              }
+            >
+              <CopyPlus data-icon="inline-start" />
+              Duplikat
             </Button>
 
             {!quotation.supersededByRevision && quotation.status === "SENT" && (
