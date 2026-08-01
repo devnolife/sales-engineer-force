@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "b2b-value-negotiation": {
+      "source": "samarv/shanon",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/b2b-value-negotiation/SKILL.md",
+      "computedHash": "c6b7e968a940e5d8f1af5568a9c203a75083755298df420431a55fdac6e552e2"
+    },
+    "crm-builder": {
+      "source": "customware-ai/skills",
+      "sourceType": "github",
+      "skillPath": "skills/crm-builder/SKILL.md",
+      "computedHash": "af1984edcfc32d68cc9efe1a3e4fe0ed27457189897be81c958ba6f584da4d8a"
+    }
+  }
+}

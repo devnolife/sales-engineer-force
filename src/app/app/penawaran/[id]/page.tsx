@@ -13,6 +13,7 @@ import {
 } from "@/modules/quotation/lib/quotation-status";
 import { withRevision } from "@/modules/quotation/lib/quotation-number";
 import { getQuotation } from "@/modules/quotation/service";
+import { isPdfEnabled } from "@/modules/pdf/service";
 import { PageHeader } from "@/components/page-header";
 import { QuotationDocument } from "@/components/quotations/quotation-document";
 import { Badge } from "@/components/ui/badge";
@@ -98,6 +99,7 @@ export default async function PenawaranDetailPage({
               nomor,
               total: quotation.total,
               supersededByRevision,
+              pdfEnabled: isPdfEnabled(),
             }}
           />
 

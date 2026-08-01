@@ -61,11 +61,11 @@ export async function listDeals(
       ...(stage ? { stage } : {}),
       ...(search
         ? {
-            OR: [
-              { title: { contains: search } },
-              { customer: { name: { contains: search } } },
-            ],
-          }
+          OR: [
+            { title: { contains: search } },
+            { customer: { name: { contains: search } } },
+          ],
+        }
         : {}),
     },
     include: {
@@ -190,11 +190,22 @@ export async function toggleReminder(scope: OrgScope, id: string, done: boolean)
   });
 }
 
-export async function listDueReminders(scope: OrgScope, limit = 10) {
+export async function listDueReminders(
+  scope: OrgScope,
+  limit = 10,
+  /** Jika diisi (role sales), hanya reminder miliknya: assignee dia atau deal-nya. */
+  forUserId?: string,
+) {
   const endOfToday = new Date();
   endOfToday.setHours(23, 59, 59, 999);
   return scope.db.reminder.findMany({
-    where: { done: false, dueAt: { lte: endOfToday } },
+    where: {
+      done: false,
+      dueAt: { lte: endOfToday },
+      ...(forUserId
+        ? { OR: [{ assigneeId: forUserId }, { deal: { ownerId: forUserId } }] }
+        : {}),
+    },
     include: { deal: { select: { id: true, title: true } } },
     orderBy: { dueAt: "asc" },
     take: limit,

@@ -57,6 +57,7 @@ interface QuotationActionsData {
   nomor: string;
   total: string;
   supersededByRevision: boolean;
+  pdfEnabled: boolean;
 }
 
 export function QuotationActions({ quotation }: { quotation: QuotationActionsData }) {
@@ -79,6 +80,30 @@ export function QuotationActions({ quotation }: { quotation: QuotationActionsDat
         router.refresh();
       } else {
         toast.error(result.error ?? "Gagal.");
+      }
+    });
+  }
+
+  async function unduhPdf() {
+    if (!quotation.pdfEnabled) {
+      window.print();
+      return;
+    }
+    startTransition(async () => {
+      try {
+        const res = await fetch(`/api/penawaran/${quotation.id}/pdf`);
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        const blob = await res.blob();
+        const disposition = res.headers.get("Content-Disposition") ?? "";
+        const match = /filename="([^"]+)"/.exec(disposition);
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = match?.[1] ?? "penawaran.pdf";
+        a.click();
+        URL.revokeObjectURL(a.href);
+      } catch {
+        toast.info("PDF server tidak tersedia — membuka print browser.");
+        window.print();
       }
     });
   }
@@ -153,7 +178,7 @@ export function QuotationActions({ quotation }: { quotation: QuotationActionsDat
 
         {!quotation.editable && (
           <>
-            <Button variant="outline" onClick={() => window.print()}>
+            <Button variant="outline" disabled={pending} onClick={unduhPdf}>
               <Printer data-icon="inline-start" />
               Unduh PDF
             </Button>

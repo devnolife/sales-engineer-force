@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { getAiProvider } from "@/modules/ai";
+import { extractTextFromFile, isOcrSupported } from "@/modules/ai/ocr";
 import type { OrgScope } from "@/modules/org/service";
 import { createQuotation } from "@/modules/quotation/service";
 import { bestMatch, type MatchCandidate } from "./matching";
@@ -77,10 +78,21 @@ export async function createInquiryFromFile(
   const filePath = path.join(dir, fileName);
   await writeFile(filePath, file.bytes);
 
-  // File teks dibaca isinya; selain itu rawText kosong (mock tidak membaca
-  // PDF/gambar — provider asli nanti yang membaca).
+  // Sumber teks:
+  // - File teks: baca langsung.
+  // - Gambar/PDF: OCR lokal (vision model / text layer) — gagal OCR tidak
+  //   menggagalkan upload; user masih bisa tempel teks manual.
   const ext = path.extname(safeName).toLowerCase();
-  const rawText = TEXT_EXTENSIONS.has(ext) ? file.bytes.toString("utf8").slice(0, 20000) : "";
+  let rawText = "";
+  if (TEXT_EXTENSIONS.has(ext)) {
+    rawText = file.bytes.toString("utf8").slice(0, 20000);
+  } else if (isOcrSupported(ext)) {
+    try {
+      rawText = (await extractTextFromFile(ext, file.bytes)).slice(0, 20000);
+    } catch (e) {
+      console.error(`OCR gagal untuk ${safeName}:`, e);
+    }
+  }
 
   return scope.db.inquiry.create({
     data: {
@@ -152,9 +164,8 @@ export async function extractInquiry(scope: OrgScope, userId: string, inquiryId:
       kind: "INQUIRY_EXTRACTION",
       provider: extracted.provider,
       inputSummary: `${inquiry.fileName ?? "teks"} (${(inquiry.rawText ?? "").length} karakter)`,
-      outputSummary: `${extracted.items.length} item, confidence ${extracted.confidence.toFixed(2)}${
-        extracted.note ? ` — ${extracted.note}` : ""
-      }`,
+      outputSummary: `${extracted.items.length} item, confidence ${extracted.confidence.toFixed(2)}${extracted.note ? ` — ${extracted.note}` : ""
+        }`,
       createdById: userId,
     },
   });
@@ -252,9 +263,8 @@ export async function convertInquiryToQuotation(
     customerId: inquiry.customerId ?? "",
     customerName: inquiry.customerName ?? "(isi nama pelanggan)",
     attn: "",
-    subject: `Penawaran atas permintaan ${
-      inquiry.customerName ?? inquiry.fileName ?? "pelanggan"
-    }`,
+    subject: `Penawaran atas permintaan ${inquiry.customerName ?? inquiry.fileName ?? "pelanggan"
+      }`,
     quoteDate: "",
     franco: "",
     deliveryTime: "",
@@ -264,9 +274,8 @@ export async function convertInquiryToQuotation(
     vatPercent: 11,
     docDiscountType: "AMOUNT",
     docDiscountValue: "0",
-    notes: `Dibuat dari permintaan ${inquiry.fileName ?? inquiry.id} (ekstraksi ${
-      inquiry.extractedAt?.toISOString() ?? "-"
-    })`,
+    notes: `Dibuat dari permintaan ${inquiry.fileName ?? inquiry.id} (ekstraksi ${inquiry.extractedAt?.toISOString() ?? "-"
+      })`,
     items: inquiry.items.map((item) => {
       const product = item.matchedProductId
         ? productById.get(item.matchedProductId)

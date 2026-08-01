@@ -26,6 +26,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ReminderList, StageSelect, TambahAktivitasForm } from "./deal-client";
+import { DealCoach } from "./deal-coach";
 
 export const metadata = { title: "Detail Deal" };
 
@@ -197,6 +198,8 @@ export default async function DealDetailPage({
               />
             </CardContent>
           </Card>
+
+          <DealCoach dealId={deal.id} />
         </div>
       </div>
     </>

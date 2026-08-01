@@ -1,0 +1,71 @@
+# Produksi (M7): app + Postgres + Gotenberg di satu VPS.
+# Jalankan: docker compose -f docker-compose.prod.yml up -d
+# HTTPS: pasang reverse proxy (Caddy/nginx) di depan port 3000.
+#
+# WAJIB diisi via .env.production (tidak ada fallback hardcoded — pelajaran Metito):
+#   POSTGRES_PASSWORD, BETTER_AUTH_SECRET, BETTER_AUTH_URL, NEXT_PUBLIC_APP_URL,
+#   CRON_SECRET, (opsional) MAIL_PROVIDER/RESEND_API_KEY/MAIL_FROM
+services:
+  # Sinkronisasi schema DB (jalankan manual saat deploy/upgrade):
+  #   docker compose -f docker-compose.prod.yml run --rm migrate
+  migrate:
+    build:
+      context: .
+      target: build
+    profiles: ["tools"]
+    environment:
+      DATABASE_URL: "postgresql://saleskit:${POSTGRES_PASSWORD:?wajib diisi}@db:5432/saleskit"
+    command: ["pnpm", "db:push:pg"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: "postgresql://saleskit:${POSTGRES_PASSWORD:?wajib diisi}@db:5432/saleskit"
+      BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:?wajib diisi}"
+      BETTER_AUTH_URL: "${BETTER_AUTH_URL:?wajib diisi}"
+      NEXT_PUBLIC_APP_URL: "${NEXT_PUBLIC_APP_URL:?wajib diisi}"
+      CRON_SECRET: "${CRON_SECRET:?wajib diisi}"
+      GOTENBERG_URL: "http://gotenberg:3000"
+      INTERNAL_APP_URL: "http://app:3000"
+      PDF_CACHE_DIR: "/data/pdf"
+      AI_PROVIDER: "${AI_PROVIDER:-mock}"
+      SOURCING_PROVIDER: "${SOURCING_PROVIDER:-mock}"
+      MAIL_PROVIDER: "${MAIL_PROVIDER:-mock}"
+      RESEND_API_KEY: "${RESEND_API_KEY:-}"
+      MAIL_FROM: "${MAIL_FROM:-}"
+    volumes:
+      - pdf-cache:/data/pdf
+    depends_on:
+      db:
+        condition: service_healthy
+      gotenberg:
+        condition: service_started
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: saleskit
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?wajib diisi}"
+      POSTGRES_DB: saleskit
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U saleskit -d saleskit"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  pdf-cache:
