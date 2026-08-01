@@ -516,15 +516,15 @@ export function CariVendorDialog() {
       <DialogTrigger asChild>
         <Button variant="outline">
           <Search data-icon="inline-start" />
-          Cari vendor (mock)
+          Cari vendor
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Cari vendor</DialogTitle>
           <DialogDescription>
-            Cari sumber harga modal: pricelist internal dicek lebih dulu, lalu hasil web
-            (mock). Minimal 3 karakter.
+            Cari sumber harga modal: pricelist internal dicek lebih dulu, lalu hasil web.
+            Minimal 3 karakter.
           </DialogDescription>
         </DialogHeader>
 
@@ -567,12 +567,27 @@ export function CariVendorDialog() {
                         <Badge
                           variant={r.sourceType === "INTERNAL" ? "secondary" : "outline"}
                         >
-                          {r.sourceType === "INTERNAL" ? "Internal" : "Web (mock)"}
+                          {r.sourceType === "INTERNAL"
+                            ? "Internal"
+                            : r.sourceType === "WEB"
+                              ? "Web"
+                              : "Web (mock)"}
                         </Badge>
                       </TableCell>
                       <TableCell className="max-w-48">
                         <div className="grid gap-0.5">
-                          <span className="truncate">{r.vendorName}</span>
+                          {r.sourceUrl ? (
+                            <a
+                              href={r.sourceUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="truncate underline-offset-4 hover:underline"
+                            >
+                              {r.vendorName}
+                            </a>
+                          ) : (
+                            <span className="truncate">{r.vendorName}</span>
+                          )}
                           {r.city && (
                             <span className="truncate text-xs text-muted-foreground">
                               {r.city}
@@ -594,8 +609,8 @@ export function CariVendorDialog() {
               </Table>
               {hasMock && (
                 <p className="text-xs text-muted-foreground">
-                  Hasil web berlabel (mock) adalah data contoh — provider Firecrawl asli
-                  menyusul; harga bukan data nyata.
+                  Hasil web berlabel (mock) adalah data contoh. Untuk pencarian web
+                  nyata: set SOURCING_PROVIDER=firecrawl + FIRECRAWL_API_KEY di .env.
                 </p>
               )}
             </div>

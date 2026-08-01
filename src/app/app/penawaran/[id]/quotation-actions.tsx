@@ -47,6 +47,7 @@ import {
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
+import { EmailDialog } from "./email-dialog";
 
 interface QuotationActionsData {
   id: string;
@@ -184,6 +185,10 @@ export function QuotationActions({ quotation }: { quotation: QuotationActionsDat
             </Button>
             {quotation.publicToken && (
               <>
+                <EmailDialog
+                  quotationId={quotation.id}
+                  pdfEnabled={quotation.pdfEnabled}
+                />
                 <Button variant="outline" onClick={copyLink}>
                   <Copy data-icon="inline-start" />
                   Salin tautan publik

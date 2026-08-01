@@ -13,8 +13,8 @@ export interface VendorSearchResult {
   price?: string;
   unit?: string;
   city?: string;
-  sourceType: "INTERNAL" | "WEB_MOCK";
-  sourceLabel: string; // mis. "Pricelist internal", "Marketplace (mock)"
+  sourceType: "INTERNAL" | "WEB" | "WEB_MOCK";
+  sourceLabel: string; // mis. "Pricelist internal", "Web (Firecrawl)", "Marketplace (mock)"
   sourceUrl?: string;
   note?: string;
 }

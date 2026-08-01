@@ -7,10 +7,17 @@ import "server-only";
  * Swap provider cukup lewat env — pemanggil tidak berubah.
  */
 
+export interface MailAttachment {
+  filename: string;
+  /** Isi file (di-encode base64 saat dikirim). */
+  content: Buffer;
+}
+
 export interface MailMessage {
   to: string;
   subject: string;
   text: string;
+  attachments?: MailAttachment[];
 }
 
 export async function sendMail(msg: MailMessage): Promise<void> {
@@ -28,8 +35,21 @@ export async function sendMail(msg: MailMessage): Promise<void> {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ from, to: msg.to, subject: msg.subject, text: msg.text }),
-      signal: AbortSignal.timeout(10_000),
+      body: JSON.stringify({
+        from,
+        to: msg.to,
+        subject: msg.subject,
+        text: msg.text,
+        ...(msg.attachments?.length
+          ? {
+            attachments: msg.attachments.map((a) => ({
+              filename: a.filename,
+              content: a.content.toString("base64"),
+            })),
+          }
+          : {}),
+      }),
+      signal: AbortSignal.timeout(30_000),
     });
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
@@ -38,5 +58,8 @@ export async function sendMail(msg: MailMessage): Promise<void> {
     return;
   }
 
-  console.log(`[MOCK EMAIL] Ke: ${msg.to} | ${msg.subject}\n${msg.text}`);
+  const lampiran = msg.attachments?.length
+    ? ` [lampiran: ${msg.attachments.map((a) => `${a.filename} (${Math.round(a.content.byteLength / 1024)} KB)`).join(", ")}]`
+    : "";
+  console.log(`[MOCK EMAIL] Ke: ${msg.to} | ${msg.subject}${lampiran}\n${msg.text}`);
 }

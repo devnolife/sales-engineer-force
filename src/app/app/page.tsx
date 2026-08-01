@@ -3,6 +3,7 @@ import { Decimal } from "decimal.js";
 import { requireOrgContext } from "@/lib/org-context";
 import { formatRupiah, formatTanggal } from "@/lib/format";
 import { listDueReminders, STAGE_LABEL, type DealStage } from "@/modules/pipeline/service";
+import { getFollowUpSignals, type FollowUpKind } from "@/modules/pipeline/follow-up";
 import { displayNumber } from "@/modules/quotation/service";
 import {
   displayStatus,
@@ -37,7 +38,7 @@ export default async function DashboardPage() {
   const dealScope = salesOnly ? { ownerId: ctx.userId } : {};
   const quotationScope = salesOnly ? { createdById: ctx.userId } : {};
 
-  const [deals, quotationsThisMonth, decidedQuotations, expiringSoon, dueReminders, recentQuotations] =
+  const [deals, quotationsThisMonth, decidedQuotations, expiringSoon, dueReminders, followUpSignals, recentQuotations] =
     await Promise.all([
       ctx.db.deal.findMany({
         where: { stage: { notIn: ["WON", "LOST"] }, ...dealScope },
@@ -59,6 +60,7 @@ export default async function DashboardPage() {
         },
       }),
       listDueReminders(ctx, 5, salesOnly ? ctx.userId : undefined),
+      getFollowUpSignals(ctx, { forUserId: salesOnly ? ctx.userId : undefined }),
       ctx.db.quotation.findMany({
         where: quotationScope,
         orderBy: { createdAt: "desc" },
@@ -230,6 +232,50 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Sinyal follow-up pintar — dari view tracking penawaran */}
+      {followUpSignals.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Sinyal follow-up</CardTitle>
+            <CardDescription>
+              Dibaca dari aktivitas pelanggan pada tautan penawaran — prioritaskan yang panas.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            {followUpSignals.map((s) => {
+              const badge: Record<FollowUpKind, { label: string; variant: "default" | "secondary" | "destructive" }> = {
+                HOT: { label: "🔥 Panas", variant: "default" },
+                VIEWED: { label: "Dilihat", variant: "secondary" },
+                STALE: { label: "Belum dibuka", variant: "destructive" },
+              };
+              const b = badge[s.kind];
+              return (
+                <Link
+                  key={s.quotationId}
+                  href={`/app/penawaran/${s.quotationId}`}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 hover:bg-accent"
+                >
+                  <span className="min-w-0">
+                    <span className="flex items-center gap-2 text-sm font-medium">
+                      <Badge variant={b.variant}>{b.label}</Badge>
+                      <span className="truncate">
+                        {s.nomor ? displayNumber(s.nomor, s.revision) : "(Draft)"} — {s.customerName}
+                      </span>
+                    </span>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {s.hint}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-sm tabular-nums">
+                    {formatRupiah(s.total)}
+                  </span>
+                </Link>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Penawaran terbaru */}
       <Card>

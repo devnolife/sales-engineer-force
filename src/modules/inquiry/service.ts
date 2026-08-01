@@ -5,7 +5,8 @@ import { getAiProvider } from "@/modules/ai";
 import { extractTextFromFile, isOcrSupported } from "@/modules/ai/ocr";
 import type { OrgScope } from "@/modules/org/service";
 import { createQuotation } from "@/modules/quotation/service";
-import { bestMatch, type MatchCandidate } from "./matching";
+import type { MatchCandidate } from "./matching";
+import { bestMatchesSemantic } from "./matching-semantic";
 
 /**
  * Modul permintaan (inquiry): upload/paste permintaan pelanggan ->
@@ -129,8 +130,12 @@ export async function extractInquiry(scope: OrgScope, userId: string, inquiryId:
   // Ganti item lama (ekstraksi ulang = replace).
   await scope.db.inquiryItem.deleteMany({ where: { inquiryId } });
 
+  // Matching semantik batch: token + embedding (bge-m3), fallback token-only.
+  const queries = extracted.items.map((item) => `${item.name} ${item.spec ?? ""}`);
+  const matches = await bestMatchesSemantic(queries, candidates);
+
   for (const [index, item] of extracted.items.entries()) {
-    const match = bestMatch(`${item.name} ${item.spec ?? ""}`, candidates);
+    const match = matches[index] ?? null;
     await scope.db.inquiryItem.create({
       data: {
         organizationId: scope.orgId,

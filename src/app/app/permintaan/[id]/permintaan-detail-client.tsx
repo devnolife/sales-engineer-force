@@ -488,7 +488,7 @@ function ItemVendorSearch({
           <DialogHeader>
             <DialogTitle>Cari vendor: {defaultQuery}</DialogTitle>
             <DialogDescription>
-              Urutan sumber: pricelist internal dulu (paling akurat), lalu web (mock).
+              Urutan sumber: pricelist internal dulu (paling akurat), lalu web.
             </DialogDescription>
           </DialogHeader>
           <div className="flex gap-2">
@@ -532,12 +532,27 @@ function ItemVendorSearch({
                           <Badge
                             variant={r.sourceType === "INTERNAL" ? "secondary" : "outline"}
                           >
-                            {r.sourceType === "INTERNAL" ? "Internal" : "Web (mock)"}
+                            {r.sourceType === "INTERNAL"
+                              ? "Internal"
+                              : r.sourceType === "WEB"
+                                ? "Web"
+                                : "Web (mock)"}
                           </Badge>
                         </TableCell>
                         <TableCell>
                           <div className="grid gap-0.5">
-                            <span>{r.vendorName}</span>
+                            {r.sourceUrl ? (
+                              <a
+                                href={r.sourceUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="underline-offset-4 hover:underline"
+                              >
+                                {r.vendorName}
+                              </a>
+                            ) : (
+                              <span>{r.vendorName}</span>
+                            )}
                             {r.city && (
                               <span className="text-xs text-muted-foreground">{r.city}</span>
                             )}
@@ -554,8 +569,8 @@ function ItemVendorSearch({
               )}
               {adaWebMock && (
                 <p className="text-xs text-muted-foreground">
-                  Hasil berlabel (mock) adalah data contoh — bukan harga nyata. Provider
-                  web asli (Firecrawl) dipasang belakangan lewat interface yang sama.
+                  Hasil berlabel (mock) adalah data contoh — bukan harga nyata. Aktifkan
+                  pencarian nyata: SOURCING_PROVIDER=firecrawl + FIRECRAWL_API_KEY di .env.
                 </p>
               )}
             </div>

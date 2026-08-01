@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { OrgScope } from "@/modules/org/service";
 import { normalizeTokens } from "@/modules/inquiry/matching";
+import { FirecrawlSourcingProvider } from "./firecrawl-provider";
 import { MockSourcingProvider } from "./mock-provider";
 import type { SourcingProvider, VendorSearchResult } from "./types";
 
@@ -8,11 +9,11 @@ export type { VendorSearchResult } from "./types";
 
 /**
  * Modul sourcing: database vendor internal (+ pricelist) dan pencarian
- * gabungan: internal DULU (paling akurat), lalu web (mock).
+ * gabungan: internal DULU (paling akurat), lalu web.
  *
  * Urutan prioritas sumber harga modal (kesepakatan desain):
  * 1. Pricelist vendor internal / histori beli — data sendiri
- * 2. Hasil web — indikatif, provider mock berlabel jelas
+ * 2. Hasil web — indikatif; "firecrawl" (nyata) atau "mock" (label jelas)
  */
 
 export function getSourcingProvider(): SourcingProvider {
@@ -20,6 +21,8 @@ export function getSourcingProvider(): SourcingProvider {
   switch (name) {
     case "mock":
       return new MockSourcingProvider();
+    case "firecrawl":
+      return new FirecrawlSourcingProvider();
     default:
       console.warn(`SOURCING_PROVIDER "${name}" belum tersedia — memakai mock.`);
       return new MockSourcingProvider();
@@ -53,12 +56,12 @@ export async function listVendors(scope: OrgScope, opts: { search?: string } = {
   return scope.db.vendor.findMany({
     where: opts.search
       ? {
-          OR: [
-            { name: { contains: opts.search } },
-            { city: { contains: opts.search } },
-            { products: { some: { name: { contains: opts.search } } } },
-          ],
-        }
+        OR: [
+          { name: { contains: opts.search } },
+          { city: { contains: opts.search } },
+          { products: { some: { name: { contains: opts.search } } } },
+        ],
+      }
       : {},
     include: { _count: { select: { products: true } } },
     orderBy: { name: "asc" },
