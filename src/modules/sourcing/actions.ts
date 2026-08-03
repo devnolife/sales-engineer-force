@@ -14,6 +14,7 @@ import {
   type VendorProductInput,
   type VendorSearchResult,
 } from "./service";
+import { scrapeVendorPageDetail, type VendorPageDetail } from "./scrape-detail";
 
 export type ActionResult<T = undefined> =
   | { ok: true; data?: T }
@@ -23,6 +24,21 @@ function errMessage(e: unknown, fallback: string): string {
   if (e instanceof z.ZodError) return e.issues[0]?.message ?? fallback;
   if (e instanceof Error && e.message) return e.message;
   return fallback;
+}
+
+/** Ambil harga & kontak dari halaman toko (on-demand — hemat kuota scrape). */
+export async function ambilDetailTokoAction(
+  url: string,
+): Promise<ActionResult<VendorPageDetail>> {
+  try {
+    await requireOrgContext(); // auth wajib; scrape hanya untuk user login
+    const parsed = z.string().url().parse(url);
+    if (!/^https?:\/\//.test(parsed)) throw new Error("URL tidak valid.");
+    const detail = await scrapeVendorPageDetail(parsed);
+    return { ok: true, data: detail };
+  } catch (e) {
+    return { ok: false, error: errMessage(e, "Gagal membaca halaman toko.") };
+  }
 }
 
 export async function simpanVendorAction(

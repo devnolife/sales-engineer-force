@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { OrgScope } from "@/modules/org/service";
 import { normalizeTokens } from "@/modules/inquiry/matching";
-import { FirecrawlSourcingProvider } from "./firecrawl-provider";
+import { coreAiPost, isCoreAiEnabled } from "@/lib/core-ai";
 import { MockSourcingProvider } from "./mock-provider";
 import type { SourcingProvider, VendorSearchResult } from "./types";
 
@@ -11,22 +11,32 @@ export type { VendorSearchResult } from "./types";
  * Modul sourcing: database vendor internal (+ pricelist) dan pencarian
  * gabungan: internal DULU (paling akurat), lalu web.
  *
- * Urutan prioritas sumber harga modal (kesepakatan desain):
- * 1. Pricelist vendor internal / histori beli — data sendiri
- * 2. Hasil web — indikatif; "firecrawl" (nyata) atau "mock" (label jelas)
+ * Pencarian web kini dilakukan oleh service core-ai (provider mock/firecrawl
+ * dipilih via env di core-ai). Tanpa CORE_AI_URL: fallback mock lokal.
  */
 
-export function getSourcingProvider(): SourcingProvider {
-  const name = process.env.SOURCING_PROVIDER ?? "mock";
-  switch (name) {
-    case "mock":
-      return new MockSourcingProvider();
-    case "firecrawl":
-      return new FirecrawlSourcingProvider();
-    default:
-      console.warn(`SOURCING_PROVIDER "${name}" belum tersedia — memakai mock.`);
-      return new MockSourcingProvider();
+class RemoteSourcingProvider implements SourcingProvider {
+  readonly name = "core-ai";
+  private fallback = new MockSourcingProvider();
+
+  async searchWeb(query: string): Promise<VendorSearchResult[]> {
+    try {
+      const { results } = await coreAiPost<{ provider: string; results: VendorSearchResult[] }>(
+        "/v1/sourcing/search",
+        { query },
+        { timeoutMs: 45_000 },
+      );
+      return results;
+    } catch (e) {
+      console.error("core-ai sourcing search gagal — fallback ke mock lokal:", e);
+      return this.fallback.searchWeb(query);
+    }
   }
+}
+
+export function getSourcingProvider(): SourcingProvider {
+  if (isCoreAiEnabled()) return new RemoteSourcingProvider();
+  return new MockSourcingProvider();
 }
 
 // ---------- Vendor CRUD ----------
@@ -129,6 +139,21 @@ export async function deleteVendorProduct(scope: OrgScope, id: string) {
 
 // ---------- Pencarian gabungan (internal + web mock) ----------
 
+/** Margin jual default di atas harga modal (%). Override: SOURCING_MARGIN_PERCENT. */
+export function defaultMarginPercent(): number {
+  const n = Number(process.env.SOURCING_MARGIN_PERCENT ?? 30);
+  return Number.isFinite(n) && n >= 0 && n <= 500 ? n : 30;
+}
+
+/** Harga jual saran = modal × (1 + margin), dibulatkan ke ribuan terdekat. */
+export function suggestSellPrice(costPrice: string | undefined, marginPercent: number): string | undefined {
+  if (!costPrice) return undefined;
+  const cost = Number(costPrice);
+  if (!Number.isFinite(cost) || cost <= 0) return undefined;
+  const sell = cost * (1 + marginPercent / 100);
+  return String(Math.round(sell / 1000) * 1000);
+}
+
 export async function searchVendorSources(
   scope: OrgScope,
   userId: string,
@@ -138,6 +163,8 @@ export async function searchVendorSources(
   const q = query.trim();
   if (q.length < 3) return [];
 
+  const margin = defaultMarginPercent();
+
   // 1) Internal: pricelist vendor — cari per token supaya fleksibel.
   const tokens = normalizeTokens(q).slice(0, 5);
   const internal = await scope.db.vendorProduct.findMany({
@@ -145,7 +172,7 @@ export async function searchVendorSources(
       tokens.length > 0
         ? { OR: tokens.map((t) => ({ name: { contains: t } })) }
         : { name: { contains: q } },
-    include: { vendor: { select: { name: true, city: true } } },
+    include: { vendor: { select: { name: true, city: true, phone: true, email: true } } },
     take: 10,
     orderBy: { updatedAt: "desc" },
   });
@@ -154,15 +181,20 @@ export async function searchVendorSources(
     vendorName: vp.vendor.name,
     productName: vp.name,
     price: vp.price,
+    suggestedPrice: suggestSellPrice(vp.price, margin),
     unit: vp.unit,
     city: vp.vendor.city ?? undefined,
+    contact: [vp.vendor.phone, vp.vendor.email].filter(Boolean).join(" · ") || undefined,
     sourceType: "INTERNAL",
     sourceLabel: "Pricelist internal",
   }));
 
   // 2) Web (provider mock).
   const provider = getSourcingProvider();
-  const webResults = await provider.searchWeb(q);
+  const webResults = (await provider.searchWeb(q)).map((r) => ({
+    ...r,
+    suggestedPrice: r.suggestedPrice ?? suggestSellPrice(r.price, margin),
+  }));
 
   const results = [...internalResults, ...webResults];
 

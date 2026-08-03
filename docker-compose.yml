@@ -1,4 +1,4 @@
-# Dev stack: Gotenberg untuk PDF server-side (M4).
+# Dev stack: Gotenberg untuk PDF server-side (M4) + core-ai (service AI terpisah).
 # Aplikasi tetap jalan via `pnpm dev` di host; Gotenberg menjangkau app
 # lewat host.docker.internal (lihat INTERNAL_APP_URL di .env).
 services:
@@ -6,6 +6,22 @@ services:
     image: gotenberg/gotenberg:8
     ports:
       - "3001:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # Service core-ai — repo terpisah (../core-ai). Alternatif: `pnpm dev:ai` di host.
+  core-ai:
+    build: ../core-ai
+    ports:
+      - "8787:8787"
+    environment:
+      AI_PROVIDER: "${AI_PROVIDER:-mock}"
+      SOURCING_PROVIDER: "${SOURCING_PROVIDER:-mock}"
+      OLLAMA_URL: "${OLLAMA_URL:-http://host.docker.internal:11434}"
+      GOTENBERG_URL: "http://gotenberg:3000"
+      FIRECRAWL_API_KEY: "${FIRECRAWL_API_KEY:-}"
+      CORE_AI_API_KEY: "${CORE_AI_API_KEY:-}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped

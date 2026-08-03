@@ -522,7 +522,8 @@ function ItemVendorSearch({
                       <TableHead>Sumber</TableHead>
                       <TableHead>Vendor</TableHead>
                       <TableHead>Produk</TableHead>
-                      <TableHead className="text-right">Harga indikatif</TableHead>
+                      <TableHead className="text-right">Modal</TableHead>
+                      <TableHead className="text-right">Jual (+30%)</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -553,14 +554,19 @@ function ItemVendorSearch({
                             ) : (
                               <span>{r.vendorName}</span>
                             )}
-                            {r.city && (
-                              <span className="text-xs text-muted-foreground">{r.city}</span>
+                            {(r.contact || r.city) && (
+                              <span className="text-xs text-muted-foreground">
+                                {[r.city, r.contact].filter(Boolean).join(" · ")}
+                              </span>
                             )}
                           </div>
                         </TableCell>
                         <TableCell className="max-w-48 truncate">{r.productName}</TableCell>
                         <TableCell className="text-right tabular-nums">
                           {r.price ? `${formatRupiah(r.price)}/${r.unit ?? "Unit"}` : "-"}
+                        </TableCell>
+                        <TableCell className="text-right font-medium tabular-nums">
+                          {r.suggestedPrice ? formatRupiah(r.suggestedPrice) : "-"}
                         </TableCell>
                       </TableRow>
                     ))}

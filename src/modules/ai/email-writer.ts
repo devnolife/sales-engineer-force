@@ -1,36 +1,13 @@
 import "server-only";
 
-import { Agent, fetch as undiciFetch } from "undici";
+import { coreAiPost, isCoreAiEnabled } from "@/lib/core-ai";
 
 /**
- * AI Email Writer — draft email penawaran otomatis via LLM lokal (Ollama).
- * Human-in-the-loop: hasil selalu bisa diedit sebelum dikirim.
- * Jika LLM tidak tersedia, fallback ke template statis (tidak pernah gagal).
+ * AI Email Writer — klien tipis ke service core-ai.
+ * Logika LLM ada di core-ai/src/ai/email-writer.ts.
+ * Fallback template statis tetap di sini agar fitur tidak pernah gagal
+ * walau core-ai mati/belum diset.
  */
-
-const dispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
-
-const SCHEMA = {
-  type: "object",
-  properties: {
-    subject: { type: "string" },
-    body: { type: "string" },
-  },
-  required: ["subject", "body"],
-} as const;
-
-const SYSTEM_PROMPT = `Kamu penulis email bisnis B2B teknik Indonesia untuk sales engineer.
-Tulis email pengantar surat penawaran ke pelanggan.
-
-Aturan:
-- Bahasa Indonesia formal-hangat, ringkas (maks 150 kata), tanpa basa-basi berlebihan.
-- Struktur: salam ("Yth. ..."), pengantar 1 kalimat merujuk permintaan mereka,
-  sebutkan nomor penawaran & ringkasan singkat item/nilai, sebutkan lampiran PDF
-  dan/atau tautan dokumen, masa berlaku, ajakan diskusi, salam penutup dengan nama pengirim.
-- "subject" ringkas: "Penawaran {nomor} — {perihal singkat}".
-- Jangan mengarang data apa pun di luar yang diberikan: TANPA nomor telepon,
-  alamat email, jabatan, atau harga yang tidak ada di input.
-- Body berupa plain text (tanpa markdown/HTML).`;
 
 export interface EmailDraftInput {
   nomor: string;
@@ -75,43 +52,11 @@ function fallbackDraft(input: EmailDraftInput): EmailDraft {
 }
 
 export async function draftQuotationEmail(input: EmailDraftInput): Promise<EmailDraft> {
-  const baseUrl = process.env.OLLAMA_URL ?? "http://localhost:11434";
-  const model = process.env.OLLAMA_MODEL ?? "llama3.2:latest";
-
+  if (!isCoreAiEnabled()) return fallbackDraft(input);
   try {
-    const res = await undiciFetch(`${baseUrl}/api/chat`, {
-      dispatcher,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model,
-        stream: false,
-        format: SCHEMA,
-        keep_alive: "30m",
-        options: { temperature: 0.3 },
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: JSON.stringify(input, null, 2) },
-        ],
-      }),
-      signal: AbortSignal.timeout(120_000),
-    });
-    if (!res.ok) throw new Error(`Ollama ${res.status}`);
-
-    const data = (await res.json()) as { message?: { content?: string } };
-    const parsed = JSON.parse(data.message?.content ?? "{}") as {
-      subject?: string;
-      body?: string;
-    };
-    if (!parsed.subject || !parsed.body) throw new Error("Draft kosong");
-
-    return {
-      subject: String(parsed.subject).slice(0, 150),
-      body: String(parsed.body),
-      provider: `ollama:${model}`,
-    };
+    return await coreAiPost<EmailDraft>("/v1/email-draft", input, { timeoutMs: 150_000 });
   } catch (e) {
-    console.error("AI email draft gagal — pakai template:", e);
+    console.error("core-ai email draft gagal — pakai template:", e);
     return fallbackDraft(input);
   }
 }

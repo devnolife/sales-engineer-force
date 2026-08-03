@@ -2,6 +2,8 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { coreAiPostBinary, isCoreAiEnabled } from "@/lib/core-ai";
+
 /**
  * Modul PDF server-side (M4).
  *
@@ -18,7 +20,8 @@ import path from "node:path";
 const DEFAULT_CACHE_DIR = ".data/pdf";
 
 export function isPdfEnabled(): boolean {
-  return Boolean(process.env.GOTENBERG_URL);
+  // Render bisa lewat core-ai (disarankan) atau Gotenberg langsung (legacy).
+  return isCoreAiEnabled() || Boolean(process.env.GOTENBERG_URL);
 }
 
 /** URL yang dipakai Gotenberg untuk menjangkau aplikasi (dalam docker: nama service). */
@@ -71,10 +74,16 @@ async function cachePath(input: GeneratePdfInput): Promise<string> {
   return path.join(dir, `${input.quotationId}-rev${input.revision}.pdf`);
 }
 
-async function renderViaGotenberg(printUrl: string): Promise<Buffer> {
+async function renderPdf(printUrl: string): Promise<Buffer> {
+  // Jalur utama: service core-ai (yang memegang koneksi Gotenberg).
+  if (isCoreAiEnabled()) {
+    return coreAiPostBinary("/v1/pdf/render", { url: printUrl }, { timeoutMs: 30_000 });
+  }
+
+  // Legacy: Gotenberg langsung dari aplikasi.
   const gotenbergUrl = process.env.GOTENBERG_URL;
   if (!gotenbergUrl) {
-    throw new PdfError("GOTENBERG_URL belum diset — fitur PDF server nonaktif.");
+    throw new PdfError("CORE_AI_URL/GOTENBERG_URL belum diset — fitur PDF server nonaktif.");
   }
 
   const form = new FormData();
@@ -113,7 +122,7 @@ export async function generateQuotationPdf(input: GeneratePdfInput): Promise<Buf
   }
 
   const printUrl = `${internalAppUrl()}/internal/print/penawaran/${input.quotationId}?key=${printRouteKey()}`;
-  const pdf = await renderViaGotenberg(printUrl);
+  const pdf = await renderPdf(printUrl);
 
   if (input.issued) {
     const file = await cachePath(input);

@@ -7,11 +7,13 @@ import {
   Package,
   Pencil,
   Plus,
+  ScanSearch,
   Search,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
+  ambilDetailTokoAction,
   cariVendorAction,
   hapusProdukVendorAction,
   hapusVendorAction,
@@ -494,6 +496,36 @@ export function CariVendorDialog() {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [results, setResults] = useState<VendorSearchResult[] | null>(null);
+  const [detailPendingUrl, setDetailPendingUrl] = useState<string | null>(null);
+
+  function ambilDetail(index: number, url: string) {
+    setDetailPendingUrl(url);
+    startTransition(async () => {
+      const result = await ambilDetailTokoAction(url);
+      setDetailPendingUrl(null);
+      if (result.ok && result.data) {
+        const d = result.data;
+        setResults((prev) =>
+          prev
+            ? prev.map((r, i) =>
+                i === index
+                  ? {
+                      ...r,
+                      price: d.price ?? r.price,
+                      suggestedPrice: d.suggestedPrice ?? r.suggestedPrice,
+                      contact: d.contact ?? r.contact,
+                    }
+                  : r,
+              )
+            : prev,
+        );
+        if (d.note) toast.info(d.note);
+        else toast.success("Detail halaman toko terbaca.");
+      } else if (!result.ok) {
+        toast.error(result.error);
+      }
+    });
+  }
 
   function onCari(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -557,7 +589,8 @@ export function CariVendorDialog() {
                     <TableHead>Sumber</TableHead>
                     <TableHead>Vendor</TableHead>
                     <TableHead>Produk</TableHead>
-                    <TableHead className="text-right">Harga</TableHead>
+                    <TableHead className="text-right">Modal</TableHead>
+                    <TableHead className="text-right">Jual (+30%)</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -588,9 +621,9 @@ export function CariVendorDialog() {
                           ) : (
                             <span className="truncate">{r.vendorName}</span>
                           )}
-                          {r.city && (
+                          {(r.contact || r.city) && (
                             <span className="truncate text-xs text-muted-foreground">
-                              {r.city}
+                              {[r.city, r.contact].filter(Boolean).join(" · ")}
                             </span>
                           )}
                         </div>
@@ -602,6 +635,28 @@ export function CariVendorDialog() {
                         {r.price
                           ? `${formatRupiah(r.price)}/${r.unit ?? "Unit"}`
                           : "-"}
+                      </TableCell>
+                      <TableCell className="text-right font-medium tabular-nums">
+                        {r.suggestedPrice ? (
+                          formatRupiah(r.suggestedPrice)
+                        ) : r.sourceType === "WEB" && r.sourceUrl ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={detailPendingUrl !== null}
+                            onClick={() => ambilDetail(i, r.sourceUrl!)}
+                            title="Baca harga & kontak dari halaman toko"
+                          >
+                            {detailPendingUrl === r.sourceUrl ? (
+                              <Spinner data-icon="inline-start" />
+                            ) : (
+                              <ScanSearch data-icon="inline-start" />
+                            )}
+                            Ambil detail
+                          </Button>
+                        ) : (
+                          "-"
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}
