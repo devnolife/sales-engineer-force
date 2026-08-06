@@ -508,15 +508,15 @@ export function CariVendorDialog() {
         setResults((prev) =>
           prev
             ? prev.map((r, i) =>
-                i === index
-                  ? {
-                      ...r,
-                      price: d.price ?? r.price,
-                      suggestedPrice: d.suggestedPrice ?? r.suggestedPrice,
-                      contact: d.contact ?? r.contact,
-                    }
-                  : r,
-              )
+              i === index
+                ? {
+                  ...r,
+                  price: d.price ?? r.price,
+                  suggestedPrice: d.suggestedPrice ?? r.suggestedPrice,
+                  contact: d.contact ?? r.contact,
+                }
+                : r,
+            )
             : prev,
         );
         if (d.note) toast.info(d.note);
