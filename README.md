@@ -54,6 +54,8 @@ snippet, median angka halaman, ongkir, atau harga coret. Hasil dapat berstatus
 **Belum diambil**, **Harga belum tersedia**, **Perlu review**, atau tersedia
 dengan mata uang, sumber, bukti varian, dan waktu observasi. Mata uang hilang
 tidak dianggap IDR; banyak varian yang belum pasti tidak dipilihkan otomatis.
+Produk terstruktur yang tidak cocok dengan URL halaman/alias canonical juga
+ditandai **Perlu review**, tanpa memakai harga produk rekomendasi yang berbeda.
 Nama situs belum berarti identitas pemasok terverifikasi.
 
 Harga bersifat **indikatif, bukan harga transaksi atau jaminan harga terkini**.
