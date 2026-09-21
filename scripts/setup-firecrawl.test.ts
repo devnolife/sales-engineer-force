@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
@@ -15,7 +15,7 @@ const begin = "# BEGIN SalesKit Firecrawl setup";
 const end = "# END SalesKit Firecrawl setup";
 
 async function fixture(appEnv?: string, backendEnv?: string) {
-  const root = await fs.mkdtemp(path.join(tmpdir(), "saleskit-key-setup-"));
+  const root = path.resolve(path.dirname(script), "../.data", `firecrawl-setup-fixture-${randomUUID()}`);
   roots.push(root);
   const app = path.join(root, "sales-engineer-force");
   const backend = path.join(root, "core-ai");
@@ -62,7 +62,7 @@ describe("Firecrawl local setup", () => {
     const a = await env(app);
     const b = await env(backend);
     expect(a).toMatchObject({
-      SOURCING_MODE: "live", CORE_AI_URL: "http://127.0.0.1:8787",
+      SOURCING_MODE: "live", SOURCING_LIVE_PROVIDER: "firecrawl", CORE_AI_URL: "http://127.0.0.1:8787",
       DATABASE_URL: "file:./dev.db", SOURCING_MARGIN_PERCENT: "30",
     });
     expect(b).toMatchObject({ SOURCING_PROVIDER: "firecrawl", FIRECRAWL_API_KEY: apiKey, AI_PROVIDER: "mock" });
@@ -206,6 +206,14 @@ describe("Firecrawl local setup", () => {
     await absent(backend);
   });
 
+  it("refuses a live-provider override when deliberately switching back to Firecrawl", async () => {
+    const { app, backend } = await fixture();
+    await fs.writeFile(path.join(app, ".env.local"), "SOURCING_LIVE_PROVIDER=selfhost\n");
+    await expect(configureFirecrawl(app, apiKey)).rejects.toThrow(/SOURCING_LIVE_PROVIDER/);
+    await absent(app);
+    await absent(backend);
+  });
+
   it.each(["FIRECRAWL_API_KEY", "NEXT_PUBLIC_FIRECRAWL_API_KEY", "NEXT_PUBLIC_CORE_AI_API_KEY"])(
     "rejects a misplaced application secret %s", async (name) => {
       const { app, backend } = await fixture(`${name}=fc-synthetic-misplaced-key\n`);
@@ -229,6 +237,14 @@ describe("Firecrawl local setup", () => {
     await expect(configureFirecrawl(app, apiKey)).rejects.toThrow(/sama dengan.*Firecrawl/);
     await absent(app);
     expect(await fs.readFile(path.join(backend, ".env"), "utf8")).toBe(`CORE_AI_API_KEY=${apiKey}\n`);
+  });
+
+  it("does not copy a preserved Cloud key into Next.js when rotating to a different Firecrawl key", async () => {
+    const original = `CORE_AI_API_KEY=${apiKey}\nFIRECRAWL_API_KEY=${apiKey}\n`;
+    const { app, backend } = await fixture(undefined, original);
+    await expect(configureFirecrawl(app, "fc-synthetic-new-cloud-key")).rejects.toThrow(/sama dengan.*Firecrawl/);
+    await absent(app);
+    expect(await fs.readFile(path.join(backend, ".env"), "utf8")).toBe(original);
   });
 
   it("rejects symlink targets without changing the linked file", async () => {

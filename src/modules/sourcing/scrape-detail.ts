@@ -2,7 +2,7 @@ import "server-only";
 
 import { z } from "zod";
 import { SourcingError } from "./errors";
-import { sourcingMode, sourcingPost } from "./remote-provider";
+import { sourcingLiveProvider, sourcingMode, sourcingPost } from "./remote-provider";
 import { coreAiDetailSchema, publicUrlSchema, querySchema } from "./schema";
 import type { WebResultPayload } from "./types";
 
@@ -14,6 +14,8 @@ export async function scrapeVendorPageDetail(
   const parsed = requestSchema.safeParse(input);
   if (!parsed.success) throw new SourcingError("INVALID_INPUT");
   if (sourcingMode() !== "live") throw new SourcingError("NOT_ALLOWED");
-  const response = await sourcingPost("/v1/sourcing/scrape-detail", parsed.data, coreAiDetailSchema);
+  const provider = sourcingLiveProvider();
+  const response = await sourcingPost("/v1/sourcing/scrape-detail", { ...parsed.data, provider }, coreAiDetailSchema);
+  if (response.provider !== provider) throw new SourcingError("BAD_RESPONSE");
   return response.result;
 }

@@ -40,6 +40,11 @@ export function VendorSearchResults({
   };
   return (
     <div className="max-h-[55vh] overflow-auto">
+      {data.provider === "selfhost" && (
+        <p role="note" className="mb-3 rounded-md border p-3 text-sm">
+          Sourcing lokal: SearXNG + browser lokal, tanpa Firecrawl. Tetap memakai resource server.
+        </p>
+      )}
       <Table>
         <TableHeader>
           <TableRow>

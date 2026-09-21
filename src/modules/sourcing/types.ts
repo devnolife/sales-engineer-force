@@ -1,8 +1,10 @@
 export type PriceStatus = "pending" | "available" | "unavailable" | "ambiguous";
-export type SourcingEngine = "firecrawl" | "mock";
+export type SourcingEngine = "firecrawl" | "selfhost" | "mock";
+export type LiveSourcingEngine = "firecrawl" | "selfhost";
+export type SourcingSearchProvider = SourcingEngine | "unconfigured";
 
 export interface PriceEvidence {
-  method: "firecrawl-product" | "internal-pricelist" | "mock";
+  method: "firecrawl-product" | "crawl4ai-product" | "browser-use-product" | "internal-pricelist" | "mock";
   productUrl?: string;
   productTitle?: string;
   variantId?: string;
@@ -52,7 +54,7 @@ export interface SourceError {
 
 export interface SearchData {
   searchId: string;
-  provider: SourcingEngine;
+  provider: SourcingSearchProvider;
   marginPercent: number;
   results: VendorSearchResult[];
 }

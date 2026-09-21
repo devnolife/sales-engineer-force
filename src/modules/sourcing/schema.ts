@@ -1,6 +1,9 @@
 import { BlockList, isIP } from "node:net";
 import { z } from "zod";
-import { SOURCE_ERROR_CODES, type VendorSearchResult } from "./types";
+import {
+  SOURCE_ERROR_CODES, type LiveSourcingEngine, type PriceEvidence, type VendorSearchResult,
+  type WebResultPayload,
+} from "./types";
 
 export const querySchema = z.string().trim().min(3).max(500);
 const idSchema = z.string().trim().min(1).max(200);
@@ -41,7 +44,7 @@ export const positivePriceSchema = z.string().max(64)
   .refine((value) => /[1-9]/.test(value), "Harga harus positif.");
 
 const evidenceSchema = z.object({
-  method: z.enum(["firecrawl-product", "internal-pricelist", "mock"]),
+  method: z.enum(["firecrawl-product", "crawl4ai-product", "browser-use-product", "internal-pricelist", "mock"]),
   productUrl: publicUrlSchema.optional(),
   productTitle: z.string().min(1).max(500).optional(),
   variantId: z.string().min(1).max(300).optional(),
@@ -67,6 +70,11 @@ const candidateFields = {
   note: z.string().max(2000).optional(),
 };
 
+const liveEvidenceMethods: Record<LiveSourcingEngine, PriceEvidence["method"][]> = {
+  firecrawl: ["firecrawl-product"],
+  selfhost: ["crawl4ai-product", "browser-use-product"],
+};
+
 function validatePrice(result: Omit<VendorSearchResult, "id">, ctx: z.RefinementCtx) {
   const fail = (message: string) => ctx.addIssue({ code: "custom", message });
   if (result.sourceType === "WEB" && !result.sourceUrl) fail("Hasil web memerlukan URL sumber.");
@@ -84,10 +92,12 @@ function validatePrice(result: Omit<VendorSearchResult, "id">, ctx: z.Refinement
   if (result.suggestedPrice !== undefined && result.currency !== "IDR") {
     fail("Saran jual hanya berlaku untuk harga IDR.");
   }
-  const method = {
-    INTERNAL: "internal-pricelist", WEB: "firecrawl-product", WEB_MOCK: "mock",
-  }[result.sourceType];
-  if (result.evidence && result.evidence.method !== method) fail("Bukti tidak sesuai jenis sumber.");
+  const methods: Record<VendorSearchResult["sourceType"], PriceEvidence["method"][]> = {
+    INTERNAL: ["internal-pricelist"],
+    WEB: [...liveEvidenceMethods.firecrawl, ...liveEvidenceMethods.selfhost],
+    WEB_MOCK: ["mock"],
+  };
+  if (result.evidence && !methods[result.sourceType].includes(result.evidence.method)) fail("Bukti tidak sesuai jenis sumber.");
 }
 
 export const vendorResultSchema = z.object({
@@ -103,16 +113,28 @@ export const webResultSchema = z.object({
   sourceUrl: publicUrlSchema,
 }).superRefine(validatePrice);
 
+function validateProviderEvidence(
+  result: WebResultPayload, provider: LiveSourcingEngine, ctx: z.RefinementCtx,
+) {
+  if (result.evidence && !liveEvidenceMethods[provider].includes(result.evidence.method)) {
+    ctx.addIssue({ code: "custom", message: "Bukti tidak sesuai provider sourcing." });
+  }
+}
+
 export const coreAiSearchSchema = z.object({
-  provider: z.literal("firecrawl"),
+  provider: z.enum(["firecrawl", "selfhost"]),
   results: z.array(webResultSchema.refine((result) => result.priceStatus === "pending",
     "Pencarian hanya boleh mengembalikan kandidat tanpa observasi harga.")).max(5),
+}).superRefine(({ provider, results }, ctx) => {
+  for (const result of results) validateProviderEvidence(result, provider, ctx);
 });
 
 export const coreAiDetailSchema = z.object({
-  provider: z.literal("firecrawl"),
+  provider: z.enum(["firecrawl", "selfhost"]),
   result: webResultSchema.refine((result) => result.priceStatus !== "pending" && !!result.retrievedAt,
     "Detail harus memuat observasi baru beserta waktu pengambilan."),
+}).superRefine(({ provider, result }, ctx) => {
+  validateProviderEvidence(result, provider, ctx);
 });
 
 export const sourceErrorSchema = z.object({

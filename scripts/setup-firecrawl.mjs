@@ -8,14 +8,20 @@ import { parseEnv } from "node:util";
 
 const begin = "# BEGIN SalesKit Firecrawl setup";
 const end = "# END SalesKit Firecrawl setup";
-const appKeys = ["SOURCING_MODE", "CORE_AI_URL", "CORE_AI_API_KEY"];
-const backendKeys = ["SOURCING_PROVIDER", "FIRECRAWL_API_KEY", "CORE_AI_API_KEY"];
+const appKeys = ["SOURCING_MODE", "SOURCING_LIVE_PROVIDER", "CORE_AI_URL", "CORE_AI_API_KEY"];
+const backendKeys = [
+  "SOURCING_PROVIDER", "FIRECRAWL_API_KEY", "CORE_AI_API_KEY", "SEARXNG_URL",
+  "SOURCING_BROWSER_URL", "SOURCING_BROWSER_ENGINE", "SOURCING_BROWSER_API_KEY", "SEARXNG_SECRET",
+];
 const authKeys = ["BETTER_AUTH_SECRET", "CRON_SECRET"];
-const forbiddenAppKeys = ["FIRECRAWL_API_KEY", "NEXT_PUBLIC_FIRECRAWL_API_KEY", "NEXT_PUBLIC_CORE_AI_API_KEY"];
+const forbiddenAppKeys = [
+  "FIRECRAWL_API_KEY", "SOURCING_BROWSER_API_KEY", "SEARXNG_SECRET", "NEXT_PUBLIC_FIRECRAWL_API_KEY",
+  "NEXT_PUBLIC_CORE_AI_API_KEY", "NEXT_PUBLIC_SOURCING_BROWSER_API_KEY", "NEXT_PUBLIC_SEARXNG_SECRET",
+];
 
-class SetupError extends Error {}
+export class SetupError extends Error {}
 
-function errorCode(error) {
+export function errorCode(error) {
   return typeof error?.code === "string" && /^[A-Z0-9_]+$/.test(error.code)
     ? error.code : "IO_ERROR";
 }
@@ -28,8 +34,29 @@ function validateKey(value, label) {
 
 function assertNoExposedKeys(values, file) {
   if (forbiddenAppKeys.some((key) => Object.hasOwn(values, key))) {
-    throw new SetupError(`${file}: key Firecrawl hanya boleh berada di core-ai; key antar-layanan tidak boleh memakai NEXT_PUBLIC_.`);
+    throw new SetupError(`${file}: key provider hanya boleh berada di core-ai; key antar-layanan tidak boleh memakai NEXT_PUBLIC_.`);
   }
+}
+
+function assertLocalUrl(value, label) {
+  if (!value) return;
+  let url;
+  try { url = new URL(value); } catch {
+    throw new SetupError(`${label} tidak valid. Skrip ini hanya untuk layanan lokal.`);
+  }
+  if (url.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) ||
+      url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
+    throw new SetupError(`${label} bukan layanan lokal. Konfigurasi remote tidak diubah oleh skrip ini.`);
+  }
+}
+
+function privateLocalKey(value, label) {
+  if (!value) return randomBytes(32).toString("hex");
+  validateKey(value, label);
+  if (value.replace(/={1,2}$/, "").length < 32 || /change-?me|replace-?me|ganti-dengan|placeholder/i.test(value)) {
+    throw new SetupError(`${label} harus berupa token privat minimal 32 karakter, bukan placeholder.`);
+  }
+  return value;
 }
 
 async function readRegular(file, optional = false) {
@@ -129,6 +156,16 @@ async function saveTargets(targets) {
 export async function configureFirecrawl(appDir, apiKey) {
   const key = apiKey.trim();
   validateKey(key, "Firecrawl API key");
+  return configureLocalSourcing(appDir, "firecrawl", key);
+}
+
+/** @param {string} appDir */
+export async function configureSelfhost(appDir) {
+  return configureLocalSourcing(appDir, "selfhost");
+}
+
+/** @param {string} appDir @param {"firecrawl" | "selfhost"} provider @param {string} [key] */
+async function configureLocalSourcing(appDir, provider, key) {
   const inherited = [...new Set([...appKeys, ...backendKeys, ...forbiddenAppKeys, "PORT"])]
     .filter((name) => Object.hasOwn(process.env, name));
   if (inherited.length) {
@@ -155,19 +192,13 @@ export async function configureFirecrawl(appDir, apiKey) {
       throw new SetupError(`${name} menimpa ${conflicts.join(", ")}. Satukan konfigurasi tersebut ke .env dahulu.`);
     }
   }
-  if (app.values.CORE_AI_URL) {
-    let url;
-    try { url = new URL(app.values.CORE_AI_URL); } catch {
-      throw new SetupError("CORE_AI_URL tidak valid. Skrip ini hanya untuk backend lokal.");
-    }
-    if (url.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) ||
-        url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
-      throw new SetupError("CORE_AI_URL bukan backend lokal. Konfigurasi remote tidak diubah oleh skrip ini.");
-    }
-  }
+  assertLocalUrl(app.values.CORE_AI_URL, "CORE_AI_URL");
   const port = backend.values.PORT ?? "8787";
   if (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535) {
     throw new SetupError("PORT core-ai harus berupa angka 1-65535.");
+  }
+  if (provider === "selfhost" && Number(port) !== 8787) {
+    throw new SetupError("PORT core-ai harus 8787 untuk setup selfhost lokal. Port yang ada tidak diubah.");
   }
   const a = app.values.CORE_AI_API_KEY;
   const b = backend.values.CORE_AI_API_KEY;
@@ -176,12 +207,41 @@ export async function configureFirecrawl(appDir, apiKey) {
   }
   const shared = b || a || randomBytes(32).toString("hex");
   validateKey(shared, "CORE_AI_API_KEY");
-  if (shared === key) {
+  if ([key, backend.values.FIRECRAWL_API_KEY].includes(shared)) {
     throw new SetupError("CORE_AI_API_KEY tidak boleh sama dengan API key Firecrawl.");
+  }
+  for (const name of ["SOURCING_BROWSER_API_KEY", "SEARXNG_SECRET"]) {
+    if (shared === backend.values[name]) {
+      throw new SetupError(`CORE_AI_API_KEY tidak boleh sama dengan ${name}.`);
+    }
+    if (key && key === backend.values[name]) {
+      throw new SetupError(`FIRECRAWL_API_KEY tidak boleh sama dengan ${name}.`);
+    }
+  }
+  const browserEngine = backend.values.SOURCING_BROWSER_ENGINE ?? "crawl4ai";
+  let localUpdates = {};
+  if (provider === "selfhost") {
+    if (browserEngine !== "crawl4ai" && browserEngine !== "browser-use") {
+      throw new SetupError("SOURCING_BROWSER_ENGINE harus crawl4ai atau browser-use. Nilai yang ada tidak diubah.");
+    }
+    assertLocalUrl(backend.values.SEARXNG_URL, "SEARXNG_URL");
+    assertLocalUrl(backend.values.SOURCING_BROWSER_URL, "SOURCING_BROWSER_URL");
+    const browserKey = privateLocalKey(backend.values.SOURCING_BROWSER_API_KEY, "SOURCING_BROWSER_API_KEY");
+    const searxngSecret = privateLocalKey(backend.values.SEARXNG_SECRET, "SEARXNG_SECRET");
+    if ([browserKey, searxngSecret].includes(backend.values.FIRECRAWL_API_KEY)) {
+      throw new SetupError("SOURCING_BROWSER_API_KEY/SEARXNG_SECRET tidak boleh sama dengan FIRECRAWL_API_KEY.");
+    }
+    if (browserKey === searxngSecret) {
+      throw new SetupError("SOURCING_BROWSER_API_KEY dan SEARXNG_SECRET harus berbeda.");
+    }
+    localUpdates = {
+      SEARXNG_URL: "http://127.0.0.1:18888", SOURCING_BROWSER_URL: "http://127.0.0.1:18889",
+      SOURCING_BROWSER_ENGINE: browserEngine, SOURCING_BROWSER_API_KEY: browserKey, SEARXNG_SECRET: searxngSecret,
+    };
   }
   const backendUrl = `http://127.0.0.1:${Number(port)}`;
   const appUpdates = {
-    SOURCING_MODE: "live", CORE_AI_URL: backendUrl, CORE_AI_API_KEY: shared,
+    SOURCING_MODE: "live", SOURCING_LIVE_PROVIDER: provider, CORE_AI_URL: backendUrl, CORE_AI_API_KEY: shared,
     ...(!app.previous ? {
       BETTER_AUTH_SECRET: randomBytes(32).toString("hex"),
       CRON_SECRET: randomBytes(32).toString("hex"),
@@ -189,10 +249,14 @@ export async function configureFirecrawl(appDir, apiKey) {
   };
   app.updated = withManagedBlock(app.text, appUpdates, [...appKeys, ...authKeys]);
   backend.updated = withManagedBlock(backend.text, {
-    SOURCING_PROVIDER: "firecrawl", FIRECRAWL_API_KEY: key, CORE_AI_API_KEY: shared,
+    SOURCING_PROVIDER: provider, CORE_AI_API_KEY: shared,
+    ...(provider === "firecrawl" ? { FIRECRAWL_API_KEY: key } : localUpdates),
   }, backendKeys);
   await saveTargets([backend, app]);
-  return { appEnvFile: app.file, backendEnvFile: backend.file, backendUrl };
+  return {
+    appEnvFile: app.file, backendEnvFile: backend.file, backendUrl,
+    ...(provider === "selfhost" ? { browserEngine } : {}),
+  };
 }
 
 async function hiddenKey() {

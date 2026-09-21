@@ -2,7 +2,9 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { vendorResultSchema } from "@/modules/sourcing/schema";
+import type { SearchData } from "@/modules/sourcing/types";
 import fixtures from "@/modules/sourcing/__fixtures__/firecrawl-contract.json";
+import local from "@/modules/sourcing/__fixtures__/selfhost-contract.json";
 import { VendorSearchResults } from "./vendor-search-panel";
 
 vi.mock("@/modules/sourcing/actions", () => ({
@@ -17,10 +19,10 @@ const pending = vendorResultSchema.parse({ ...fixtures.search.results[0], id: "p
 const unavailable = vendorResultSchema.parse({ ...fixtures.detailUnavailable.result, id: "unavailable" });
 const ambiguous = vendorResultSchema.parse({ ...fixtures.detailAmbiguous.result, id: "ambiguous" });
 
-function render(results = [idr, usd, pending, unavailable, ambiguous]) {
+function render(results = [idr, usd, pending, unavailable, ambiguous], provider: SearchData["provider"] = "firecrawl") {
   const onDetail = vi.fn();
   const html = renderToStaticMarkup(createElement(VendorSearchResults, {
-    data: { searchId: "search-1", provider: "firecrawl", marginPercent: 30, results },
+    data: { searchId: "search-1", provider, marginPercent: 30, results },
     detailPendingId: null,
     disabled: false,
     detailErrors: {},
@@ -78,5 +80,57 @@ describe("shared sourcing results", () => {
       ...idr, id: "mock", sourceType: "WEB_MOCK", evidence: { method: "mock" },
     });
     expect(render([mock]).html).toContain("Contoh");
+  });
+
+  it("renders selfhost evidence and labels without changing detail controls or promising free resources", () => {
+    const results = [
+      local.search.results[0], local.detailCrawl4ai.result, local.detailBrowserUse.result,
+      local.detailUnavailable.result, local.detailAmbiguous.result,
+    ].map((result, index) => vendorResultSchema.parse({ ...result, id: `selfhost-${index}` }));
+    const onDetail = vi.fn();
+    const html = renderToStaticMarkup(createElement(VendorSearchResults, {
+      data: { searchId: "selfhost-search", provider: "selfhost", marginPercent: 30, results },
+      detailPendingId: null, disabled: false, detailErrors: {}, onDetail,
+    }));
+    expect(html).toContain("SearXNG · supplier.example");
+    expect(html).toContain("Sebagian mesin pencari tidak merespons; hasil mungkin tidak lengkap.");
+    expect(html).toContain("Crawl4AI · supplier.example");
+    expect(html).toContain("Browser Use · supplier.example");
+    expect(html).toContain("tanpa Firecrawl");
+    expect(html).toContain("resource server");
+    expect(html).toContain("Ambil detail");
+    expect(html).toContain("Perbarui detail");
+    expect(html).toContain("Belum diambil");
+    expect(html).toContain("Harga belum tersedia");
+    expect(html).toContain("Perlu review");
+    expect(html).toContain("USD");
+    expect(html).toContain("99,90");
+    expect(html).toContain("Bukti harga");
+    expect(html).toContain('dateTime="2026-09-01T00:00:00.000Z"');
+    expect(html).not.toMatch(/Contoh|gratis|bebas biaya/i);
+    expect(onDetail).not.toHaveBeenCalled();
+  });
+
+  it("does not show a selfhost banner for Firecrawl results", () => {
+    expect(render().html).not.toContain("tanpa Firecrawl");
+  });
+
+  it("renders the genuine internal pricelist without claiming a web engine when sourcing is unconfigured", () => {
+    const internal = vendorResultSchema.parse({
+      id: "internal", vendorName: "Vendor internal", productName: "Pompa internal",
+      priceStatus: "available", price: "100000", currency: "IDR", unit: "Unit",
+      suggestedPrice: "125000", marginPercent: 25,
+      sourceType: "INTERNAL", sourceLabel: "Pricelist internal",
+      retrievedAt: "2026-09-01T00:00:00.000Z",
+      evidence: { method: "internal-pricelist", productTitle: "Pompa internal" },
+    });
+    const { html, onDetail } = render([internal], "unconfigured");
+    expect(html).toContain("Pompa internal");
+    expect(html).toContain("Pricelist internal");
+    expect(html).toContain("100.000");
+    expect(html).toContain("125.000");
+    expect(html).toContain("+25%");
+    expect(html).not.toMatch(/Ambil detail|Contoh|Sourcing lokal|Firecrawl|SearXNG/);
+    expect(onDetail).not.toHaveBeenCalled();
   });
 });

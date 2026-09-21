@@ -7,12 +7,15 @@ import type { OrgScope } from "@/modules/org/service";
 import { normalizeTokens } from "@/modules/inquiry/matching";
 import { SourcingError, toSourceError } from "./errors";
 import { MockSourcingProvider } from "./mock-provider";
-import { RemoteSourcingProvider, sourcingMode } from "./remote-provider";
-import { detailInputSchema, positivePriceSchema, searchInputSchema, vendorResultSchema } from "./schema";
+import { RemoteSourcingProvider, sourcingLiveProvider, sourcingMode } from "./remote-provider";
+import {
+  coreAiDetailSchema, coreAiSearchSchema, detailInputSchema, positivePriceSchema, searchInputSchema,
+  vendorResultSchema,
+} from "./schema";
 import { scrapeVendorPageDetail } from "./scrape-detail";
 import type {
-  DetailActionResult, SearchActionResult, SourceError, SourcingCandidate, SourcingEngine,
-  SourcingProvider, VendorSearchResult,
+  DetailActionResult, SearchActionResult, SourceError, SourcingCandidate,
+  SourcingProvider, SourcingSearchProvider, VendorSearchResult,
 } from "./types";
 
 export type { VendorSearchResult } from "./types";
@@ -207,13 +210,13 @@ export async function searchVendorSources(
       }, marginPercent);
     });
 
-    let provider: SourcingEngine = "firecrawl";
+    let provider: SourcingSearchProvider = "unconfigured";
     let webResults: VendorSearchResult[] = [];
     let webError: SourceError | undefined;
     try {
       const adapter = getSourcingProvider();
       provider = adapter.name;
-      if (provider === "firecrawl") checkLimit(scope.orgId, "search");
+      if (provider !== "mock") checkLimit(scope.orgId, "search");
       webResults = (await adapter.searchWeb(input.query)).map((candidate) =>
         toStoredResult(candidate, marginPercent));
     } catch (error) {
@@ -265,9 +268,13 @@ function storedResults(resultsJson: string): VendorSearchResult[] {
 function storedWebResult(results: VendorSearchResult[], resultId: string, provider: string) {
   const result = results.find((candidate) => candidate.id === resultId);
   if (!result) throw new SourcingError("NOT_FOUND");
-  if (provider !== "firecrawl" || result.sourceType !== "WEB" || !result.sourceUrl) {
+  if (result.sourceType !== "WEB" || !result.sourceUrl) {
     throw new SourcingError("NOT_ALLOWED");
   }
+  const envelope = result.priceStatus === "pending"
+    ? coreAiSearchSchema.safeParse({ provider, results: [result] })
+    : coreAiDetailSchema.safeParse({ provider, result });
+  if (!envelope.success) throw new SourcingError("NOT_ALLOWED");
   return { ...result, sourceUrl: result.sourceUrl };
 }
 
@@ -283,6 +290,8 @@ export async function fetchVendorSourceDetail(
     const result = storedWebResult(storedResults(snapshot.resultsJson), params.resultId, snapshot.provider);
     await requireInquiryOwnership(scope, snapshot.inquiryItemId);
     if (sourcingMode() !== "live") throw new SourcingError("NOT_ALLOWED");
+    const provider = sourcingLiveProvider();
+    if (snapshot.provider !== provider) throw new SourcingError("NOT_ALLOWED");
     checkLimit(scope.orgId, "detail");
 
     let observation: SourcingCandidate;
@@ -292,7 +301,7 @@ export async function fetchVendorSourceDetail(
       const failure = toSourceError(error);
       await scope.db.aiLog.create({
         data: {
-          organizationId: scope.orgId, kind: "VENDOR_DETAIL", provider: "firecrawl",
+          organizationId: scope.orgId, kind: "VENDOR_DETAIL", provider,
           inputSummary: snapshot.query, outputSummary: `error; ${failure.code}`,
           createdById: userId,
         },
@@ -301,24 +310,25 @@ export async function fetchVendorSourceDetail(
     }
     const updatedResult = toStoredResult(observation, defaultMarginPercent(), params.resultId);
 
-    // Retry only the database merge; the paid detail request has already finished.
+    // Retry only the database merge; the provider request has already finished.
     for (let attempt = 0; attempt < 3; attempt++) {
       const latest = attempt === 0 ? snapshot
         : await scope.db.sourcingSearch.findFirst({ where: { id: params.searchId } });
       if (!latest) throw new SourcingError("NOT_FOUND");
+      if (latest.provider !== provider) throw new SourcingError("NOT_ALLOWED");
       const results = storedResults(latest.resultsJson);
       storedWebResult(results, params.resultId, latest.provider);
       const next = results.map((candidate) => candidate.id === params.resultId ? updatedResult : candidate);
       try {
         const written = await scope.db.$transaction(async (tx) => {
           const update = await tx.sourcingSearch.updateMany({
-            where: { id: params.searchId, organizationId: scope.orgId, resultsJson: latest.resultsJson },
+            where: { id: params.searchId, organizationId: scope.orgId, provider, resultsJson: latest.resultsJson },
             data: { resultsJson: JSON.stringify(next) },
           });
           if (update.count !== 1) return false;
           await tx.aiLog.create({
             data: {
-              organizationId: scope.orgId, kind: "VENDOR_DETAIL", provider: "firecrawl",
+              organizationId: scope.orgId, kind: "VENDOR_DETAIL", provider,
               inputSummary: latest.query,
               outputSummary: `complete; ${updatedResult.priceStatus}${updatedResult.currency ? `; ${updatedResult.currency}` : ""}`,
               createdById: userId,

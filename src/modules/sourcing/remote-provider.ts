@@ -4,12 +4,18 @@ import { z } from "zod";
 import { CoreAiError, coreAiPost, isCoreAiEnabled } from "@/lib/core-ai";
 import { SourcingError } from "./errors";
 import { coreAiErrorSchema, coreAiSearchSchema, querySchema } from "./schema";
-import type { SourceError, SourcingProvider, WebResultPayload } from "./types";
+import type { LiveSourcingEngine, SourceError, SourcingProvider, WebResultPayload } from "./types";
 
 export function sourcingMode(): "mock" | "live" {
   const mode = process.env.SOURCING_MODE?.trim();
   if (mode !== "mock" && mode !== "live") throw new SourcingError("NOT_CONFIGURED");
   return mode;
+}
+
+export function sourcingLiveProvider(): LiveSourcingEngine {
+  const provider = process.env.SOURCING_LIVE_PROVIDER?.trim() ?? "firecrawl";
+  if (provider !== "firecrawl" && provider !== "selfhost") throw new SourcingError("NOT_CONFIGURED");
+  return provider;
 }
 
 function transportError(error: unknown): SourcingError {
@@ -66,16 +72,17 @@ export async function sourcingPost<T>(
 }
 
 export class RemoteSourcingProvider implements SourcingProvider {
-  readonly name = "firecrawl";
+  readonly name = sourcingLiveProvider();
 
   async searchWeb(query: string): Promise<WebResultPayload[]> {
     const parsed = querySchema.safeParse(query);
     if (!parsed.success) throw new SourcingError("INVALID_INPUT");
     const response = await sourcingPost(
       "/v1/sourcing/search",
-      { query: parsed.data, limit: 5, country: "ID" },
+      { query: parsed.data, limit: 5, country: "ID", provider: this.name },
       coreAiSearchSchema,
     );
+    if (response.provider !== this.name) throw new SourcingError("BAD_RESPONSE");
     return response.results;
   }
 }

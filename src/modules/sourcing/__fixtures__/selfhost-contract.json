@@ -1,0 +1,82 @@
+{
+  "search": {
+    "provider": "selfhost",
+    "results": [
+      {
+        "vendorName": "supplier.example",
+        "productName": "Pompa dosing 5 LPH",
+        "priceStatus": "pending",
+        "sourceType": "WEB",
+        "sourceLabel": "SearXNG · supplier.example",
+        "sourceUrl": "https://supplier.example/products/pump",
+        "note": "Sebagian mesin pencari tidak merespons; hasil mungkin tidak lengkap."
+      }
+    ]
+  },
+  "detailCrawl4ai": {
+    "provider": "selfhost",
+    "result": {
+      "vendorName": "supplier.example",
+      "productName": "Pompa dosing 5 LPH",
+      "priceStatus": "available",
+      "price": "1250000",
+      "currency": "IDR",
+      "sourceType": "WEB",
+      "sourceLabel": "Crawl4AI · supplier.example",
+      "sourceUrl": "https://supplier.example/products/pump",
+      "retrievedAt": "2026-09-01T00:00:00.000Z",
+      "evidence": {
+        "method": "crawl4ai-product",
+        "productUrl": "https://supplier.example/products/pump",
+        "productTitle": "Pompa dosing 5 LPH",
+        "rawPriceText": "Rp 1.250.000"
+      }
+    }
+  },
+  "detailBrowserUse": {
+    "provider": "selfhost",
+    "result": {
+      "vendorName": "supplier.example",
+      "productName": "Dosing pump USD",
+      "priceStatus": "available",
+      "price": "99.90",
+      "currency": "USD",
+      "sourceType": "WEB",
+      "sourceLabel": "Browser Use · supplier.example",
+      "sourceUrl": "https://supplier.example/products/pump-usd",
+      "retrievedAt": "2026-09-01T00:00:00.000Z",
+      "evidence": {
+        "method": "browser-use-product",
+        "productUrl": "https://supplier.example/products/pump-usd",
+        "productTitle": "Dosing pump USD",
+        "rawPriceText": "$99.90"
+      }
+    }
+  },
+  "detailUnavailable": {
+    "provider": "selfhost",
+    "result": {
+      "vendorName": "supplier.example",
+      "productName": "Pompa dosing 5 LPH",
+      "priceStatus": "unavailable",
+      "sourceType": "WEB",
+      "sourceLabel": "Crawl4AI · supplier.example",
+      "sourceUrl": "https://supplier.example/products/pump",
+      "retrievedAt": "2026-09-01T00:00:00.000Z",
+      "note": "Harga produk belum tersedia."
+    }
+  },
+  "detailAmbiguous": {
+    "provider": "selfhost",
+    "result": {
+      "vendorName": "supplier.example",
+      "productName": "Pompa dosing 5 LPH",
+      "priceStatus": "ambiguous",
+      "sourceType": "WEB",
+      "sourceLabel": "Browser Use · supplier.example",
+      "sourceUrl": "https://supplier.example/products/pump",
+      "retrievedAt": "2026-09-01T00:00:00.000Z",
+      "note": "Periksa varian pada halaman produk."
+    }
+  }
+}

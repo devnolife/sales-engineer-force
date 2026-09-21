@@ -11,6 +11,9 @@ services:
     restart: unless-stopped
 
   # Service core-ai — repo terpisah (../core-ai). Alternatif: `pnpm dev:ai` di host.
+  # Selfhost lokal: gunakan docker-compose.sourcing.yml di backend untuk worker,
+  # lalu jalankan core-ai di host via `pnpm dev:ai`. URL loopback hasil setup
+  # tidak menunjuk ke host bila core-ai dijalankan di container ini.
   core-ai:
     build: ../core-ai
     env_file:

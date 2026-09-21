@@ -6,6 +6,7 @@
     "dev": "next dev",
     "dev:ai": "pnpm --dir ../core-ai dev",
     "setup:firecrawl": "node scripts/setup-firecrawl.mjs",
+    "setup:selfhost": "node scripts/setup-selfhost.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",

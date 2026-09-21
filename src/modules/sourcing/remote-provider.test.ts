@@ -4,6 +4,7 @@ import { CoreAiError, coreAiPostBinary } from "@/lib/core-ai";
 import { MockSourcingProvider } from "./mock-provider";
 import { getSourcingProvider } from "./service";
 import fixtures from "./__fixtures__/firecrawl-contract.json";
+import local from "./__fixtures__/selfhost-contract.json";
 
 vi.mock("server-only", () => ({}));
 vi.mock("undici", async (importOriginal) => ({
@@ -16,6 +17,7 @@ const http = vi.mocked(httpFetch);
 beforeEach(() => {
   http.mockReset();
   vi.stubEnv("SOURCING_MODE", "live");
+  vi.stubEnv("SOURCING_LIVE_PROVIDER", undefined);
   vi.stubEnv("CORE_AI_URL", "http://core-ai.test");
   vi.stubEnv("CORE_AI_API_KEY", "test-service-key");
 });
@@ -36,7 +38,7 @@ describe("live sourcing transport", () => {
     expect(http).toHaveBeenCalledOnce();
     expect(http).toHaveBeenCalledWith("http://core-ai.test/v1/sourcing/search", expect.objectContaining({
       method: "POST",
-      body: JSON.stringify({ query: "pompa dosing", limit: 5, country: "ID" }),
+      body: JSON.stringify({ query: "pompa dosing", limit: 5, country: "ID", provider: "firecrawl" }),
     }));
     expect(timeout).toHaveBeenCalledWith(45_000);
   });
@@ -122,6 +124,56 @@ describe("live sourcing transport", () => {
     expect(results.every((result) => result.sourceType === "WEB_MOCK" &&
       result.currency === "IDR" && result.evidence?.method === "mock")).toBe(true);
     expect(http).not.toHaveBeenCalled();
+  });
+
+  it("selects selfhost explicitly and sends that provider without changing discovery UX", async () => {
+    vi.stubEnv("SOURCING_LIVE_PROVIDER", "selfhost");
+    http.mockResolvedValue(Response.json(local.search));
+    const provider = getSourcingProvider();
+    expect(provider.name).toBe("selfhost");
+    expect(await provider.searchWeb("  pompa dosing  ")).toEqual(local.search.results);
+    expect(http).toHaveBeenCalledWith("http://core-ai.test/v1/sourcing/search", expect.objectContaining({
+      body: JSON.stringify({ query: "pompa dosing", limit: 5, country: "ID", provider: "selfhost" }),
+    }));
+  });
+
+  it.each(["", " ", "mock", "typo", "SelfHost"])(
+    "rejects explicit invalid live provider %j before network access", (provider) => {
+      vi.stubEnv("SOURCING_LIVE_PROVIDER", provider);
+      expect(getSourcingProvider).toThrowError(expect.objectContaining({ code: "NOT_CONFIGURED" }));
+      expect(http).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ["firecrawl", local.search],
+    ["selfhost", fixtures.search],
+  ])("never switches configured %s to the response provider", async (provider, response) => {
+    vi.stubEnv("SOURCING_LIVE_PROVIDER", provider);
+    http.mockResolvedValue(Response.json(response));
+    const adapter = getSourcingProvider();
+    expect(adapter.name).toBe(provider);
+    await expect(adapter.searchWeb("pompa dosing")).rejects.toMatchObject({ code: "BAD_RESPONSE" });
+    expect(adapter.name).toBe(provider);
+  });
+
+  it("pins the adapter provider at selection rather than reading it from the response", async () => {
+    vi.stubEnv("SOURCING_LIVE_PROVIDER", "selfhost");
+    const adapter = getSourcingProvider();
+    vi.stubEnv("SOURCING_LIVE_PROVIDER", "firecrawl");
+    http.mockResolvedValue(Response.json(local.search));
+    expect(await adapter.searchWeb("pompa dosing")).toEqual(local.search.results);
+    expect(adapter.name).toBe("selfhost");
+    expect(JSON.parse(String(http.mock.calls[0][1]?.body)).provider).toBe("selfhost");
+  });
+
+  it("does not fall back to Cloud or mock when selfhost is unavailable", async () => {
+    vi.stubEnv("SOURCING_LIVE_PROVIDER", "selfhost");
+    http.mockRejectedValue(new DOMException("deadline exceeded", "TimeoutError"));
+    const mock = vi.spyOn(MockSourcingProvider.prototype, "searchWeb");
+    await expect(getSourcingProvider().searchWeb("pompa dosing")).rejects.toMatchObject({ code: "TIMEOUT" });
+    expect(http).toHaveBeenCalledOnce();
+    expect(mock).not.toHaveBeenCalled();
   });
 });
 

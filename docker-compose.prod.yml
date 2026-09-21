@@ -9,6 +9,7 @@
 #   POSTGRES_PASSWORD, BETTER_AUTH_SECRET, BETTER_AUTH_URL, NEXT_PUBLIC_APP_URL,
 #   CRON_SECRET, CORE_AI_URL (URL server AI, mis. https://ai.domainmu.com),
 #   CORE_AI_API_KEY (samakan dengan server AI),
+#   SOURCING_LIVE_PROVIDER (opsional: firecrawl, atau selfhost bila backend cocok),
 #   (opsional) MAIL_PROVIDER/RESEND_API_KEY/MAIL_FROM
 #
 # Catatan PDF: Gotenberg di server AI mem-fetch halaman print aplikasi ini,
@@ -43,6 +44,7 @@ services:
       CORE_AI_URL: "${CORE_AI_URL:?wajib diisi — URL server AI}"
       CORE_AI_API_KEY: "${CORE_AI_API_KEY:?wajib diisi — samakan dengan server AI}"
       SOURCING_MODE: "live"
+      SOURCING_LIVE_PROVIDER: "${SOURCING_LIVE_PROVIDER-firecrawl}"
       SOURCING_MARGIN_PERCENT: "${SOURCING_MARGIN_PERCENT:-30}"
       INTERNAL_APP_URL: "${INTERNAL_APP_URL:-${NEXT_PUBLIC_APP_URL}}"
       PDF_CACHE_DIR: "/data/pdf"

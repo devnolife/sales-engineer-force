@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetch as httpFetch, Response } from "undici";
 import { scrapeVendorPageDetail } from "./scrape-detail";
 import fixtures from "./__fixtures__/firecrawl-contract.json";
+import local from "./__fixtures__/selfhost-contract.json";
 
 vi.mock("server-only", () => ({}));
 vi.mock("undici", async (importOriginal) => ({
@@ -15,6 +16,7 @@ const input = { query: "pompa dosing", url: "https://supplier.example/products/p
 beforeEach(() => {
   http.mockReset();
   vi.stubEnv("SOURCING_MODE", "live");
+  vi.stubEnv("SOURCING_LIVE_PROVIDER", undefined);
   vi.stubEnv("CORE_AI_URL", "http://core-ai.test");
   vi.stubEnv("FIRECRAWL_API_KEY", "");
   vi.stubGlobal("fetch", vi.fn(() => { throw new Error("Direct web calls are forbidden in SalesKit"); }));
@@ -30,7 +32,7 @@ describe("on-demand detail boundary", () => {
     expect(await scrapeVendorPageDetail(input)).toEqual(fixtures.detailIdr.result);
     expect(http).toHaveBeenCalledOnce();
     expect(http).toHaveBeenCalledWith("http://core-ai.test/v1/sourcing/scrape-detail",
-      expect.objectContaining({ body: JSON.stringify(input) }));
+      expect.objectContaining({ body: JSON.stringify({ ...input, provider: "firecrawl" }) }));
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -72,6 +74,34 @@ describe("on-demand detail boundary", () => {
   it("does not enable paid details in demo mode", async () => {
     vi.stubEnv("SOURCING_MODE", "mock");
     await expect(scrapeVendorPageDetail(input)).rejects.toMatchObject({ code: "NOT_ALLOWED" });
+    expect(http).not.toHaveBeenCalled();
+  });
+
+  it.each(["detailCrawl4ai", "detailBrowserUse", "detailUnavailable", "detailAmbiguous"] as const)(
+    "requests selfhost explicitly and keeps the authoritative %s observation", async (key) => {
+      vi.stubEnv("SOURCING_LIVE_PROVIDER", "selfhost");
+      http.mockResolvedValue(Response.json(local[key]));
+      const request = { ...input, url: local[key].result.sourceUrl };
+      expect(await scrapeVendorPageDetail(request)).toEqual(local[key].result);
+      expect(http).toHaveBeenCalledWith("http://core-ai.test/v1/sourcing/scrape-detail",
+        expect.objectContaining({ body: JSON.stringify({ ...request, provider: "selfhost" }) }));
+      expect(http).toHaveBeenCalledOnce();
+      expect(fetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ["firecrawl", local.detailCrawl4ai],
+    ["selfhost", fixtures.detailIdr],
+  ])("rejects detail provider mismatch for configured %s", async (provider, response) => {
+    vi.stubEnv("SOURCING_LIVE_PROVIDER", provider);
+    http.mockResolvedValue(Response.json(response));
+    await expect(scrapeVendorPageDetail(input)).rejects.toMatchObject({ code: "BAD_RESPONSE" });
+  });
+
+  it("rejects invalid provider configuration before making any detail request", async () => {
+    vi.stubEnv("SOURCING_LIVE_PROVIDER", "invalid");
+    await expect(scrapeVendorPageDetail(input)).rejects.toMatchObject({ code: "NOT_CONFIGURED" });
     expect(http).not.toHaveBeenCalled();
   });
 });

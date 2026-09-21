@@ -47,6 +47,7 @@ describe.runIf(process.env.RUN_DB_TESTS === "1")("scoped sourcing persistence", 
     };
     vi.mocked(requireOrgContext).mockResolvedValue(ctx);
     vi.stubEnv("SOURCING_MODE", "live");
+    vi.stubEnv("SOURCING_LIVE_PROVIDER", "firecrawl");
     vi.stubEnv("CORE_AI_URL", "http://core-ai.test");
     vi.stubEnv("SOURCING_MARGIN_PERCENT", "25");
     http.mockReset();
@@ -167,7 +168,7 @@ describe.runIf(process.env.RUN_DB_TESTS === "1")("scoped sourcing persistence", 
     });
     expect(http).toHaveBeenCalledOnce();
     expect(http).toHaveBeenCalledWith("http://core-ai.test/v1/sourcing/scrape-detail", expect.objectContaining({
-      body: JSON.stringify({ query: "pompa dosing", url: web.sourceUrl }),
+      body: JSON.stringify({ query: "pompa dosing", url: web.sourceUrl, provider: "firecrawl" }),
     }));
     expect((await stored(data.searchId)).results[2].priceStatus).toBe("available");
     expect(await ctx.db.aiLog.count({ where: { kind: "VENDOR_DETAIL" } })).toBe(1);

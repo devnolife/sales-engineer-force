@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import fixtures from "./__fixtures__/firecrawl-contract.json";
+import local from "./__fixtures__/selfhost-contract.json";
 import {
   coreAiDetailSchema,
   coreAiErrorSchema,
@@ -75,9 +76,96 @@ describe("core-ai sourcing contracts", () => {
     expect(parsed.results[0].price).toBeUndefined();
   });
 
+  describe("self-host sourcing contracts", () => {
+    it("accepts bounded pending discovery and preserves backend source labels", () => {
+      expect(coreAiSearchSchema.parse(local.search)).toEqual(local.search);
+      expect(coreAiSearchSchema.parse({ provider: "selfhost", results: [] }).results).toEqual([]);
+    });
+
+    it.each(["detailCrawl4ai", "detailBrowserUse", "detailUnavailable", "detailAmbiguous"] as const)(
+      "accepts %s with the actual local evidence method", (key) => {
+        expect(coreAiDetailSchema.parse(local[key])).toEqual(local[key]);
+        expect(vendorResultSchema.safeParse({ ...local[key].result, id: "local-result" }).success).toBe(true);
+      },
+    );
+
+    it.each(["crawl4ai-product", "browser-use-product"])(
+      "allows %s only on WEB results", (method) => {
+        for (const sourceType of ["INTERNAL", "WEB_MOCK"]) {
+          expect(vendorResultSchema.safeParse({
+            ...local.detailCrawl4ai.result, id: "invalid", sourceType,
+            evidence: { ...local.detailCrawl4ai.result.evidence, method },
+          }).success).toBe(false);
+        }
+      },
+    );
+
+    it.each([
+      ["firecrawl", "crawl4ai-product"],
+      ["firecrawl", "browser-use-product"],
+      ["selfhost", "firecrawl-product"],
+      ["selfhost", "internal-pricelist"],
+      ["selfhost", "mock"],
+    ])("rejects evidence from another provider: %s / %s", (provider, method) => {
+      const evidence = { ...local.detailCrawl4ai.result.evidence, method };
+      expect(coreAiDetailSchema.safeParse({
+        provider, result: { ...local.detailCrawl4ai.result, evidence },
+      }).success).toBe(false);
+      expect(coreAiDetailSchema.safeParse({
+        provider, result: { ...local.detailUnavailable.result, evidence },
+      }).success).toBe(false);
+      expect(coreAiSearchSchema.safeParse({
+        provider, results: [{ ...local.search.results[0], evidence }],
+      }).success).toBe(false);
+    });
+
+    it("rejects mock remote envelopes, oversized discovery, and priced search results", () => {
+      expect(coreAiDetailSchema.safeParse({ ...local.detailCrawl4ai, provider: "mock" }).success).toBe(false);
+      expect(coreAiSearchSchema.safeParse({
+        provider: "selfhost", results: Array.from({ length: 6 }, () => local.search.results[0]),
+      }).success).toBe(false);
+      expect(coreAiSearchSchema.safeParse({
+        provider: "selfhost", results: [local.detailCrawl4ai.result],
+      }).success).toBe(false);
+    });
+
+    it.each(["currency", "retrievedAt", "evidence"] as const)(
+      "still requires %s for an available selfhost price", (field) => {
+        expect(coreAiDetailSchema.safeParse({
+          provider: "selfhost", result: { ...local.detailCrawl4ai.result, [field]: undefined },
+        }).success).toBe(false);
+      },
+    );
+
+    it.each(["0", "-10", "NaN", "Infinity", "1e9", "Rp 1.000"])(
+      "still rejects invalid selfhost price %s", (price) => {
+        expect(coreAiDetailSchema.safeParse({
+          provider: "selfhost", result: { ...local.detailCrawl4ai.result, price },
+        }).success).toBe(false);
+      },
+    );
+
+    it("requires a completed, dated observation and preserves foreign currency rules", () => {
+      expect(coreAiDetailSchema.safeParse({
+        provider: "selfhost", result: local.search.results[0],
+      }).success).toBe(false);
+      expect(coreAiDetailSchema.safeParse({
+        provider: "selfhost", result: { ...local.detailUnavailable.result, price: "1000" },
+      }).success).toBe(false);
+      expect(vendorResultSchema.safeParse({
+        ...local.detailBrowserUse.result, id: "usd", suggestedPrice: "130000",
+      }).success).toBe(false);
+    });
+  });
+
   it("distinguishes an empty result list from a malformed response", () => {
     expect(coreAiSearchSchema.parse({ provider: "firecrawl", results: [] }).results).toEqual([]);
     expect(coreAiSearchSchema.safeParse({ provider: "firecrawl" }).success).toBe(false);
+  });
+
+  it("does not allow the app-only unconfigured marker in remote envelopes", () => {
+    expect(coreAiSearchSchema.safeParse({ ...local.search, provider: "unconfigured" }).success).toBe(false);
+    expect(coreAiDetailSchema.safeParse({ ...local.detailCrawl4ai, provider: "unconfigured" }).success).toBe(false);
   });
 
   it("rejects more than five web candidates", () => {
