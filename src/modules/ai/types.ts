@@ -1,9 +1,8 @@
 /**
  * Kontrak provider AI — INTERFACE STABIL (PRD §8.3).
  *
- * Kerangka mock-first: implementasi saat ini `mock` (heuristik lokal, tanpa
- * LLM). Saat pindah ke LLM asli (Vercel AI SDK + Gemini/GPT), HANYA folder
- * `modules/ai` yang berubah — pemanggil tidak tersentuh.
+ * Provider nyata berada di core-ai: parser lokal atau Ollama.
+ * Demo mock tetap terpisah dan tidak dipakai untuk dokumen unggahan.
  */
 
 export interface ExtractedInquiryItem {

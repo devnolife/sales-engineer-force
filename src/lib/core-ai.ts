@@ -1,6 +1,7 @@
 import "server-only";
 
 import { Agent, fetch as undiciFetch } from "undici";
+import { z } from "zod";
 
 /**
  * Klien HTTP ke service core-ai (proses terpisah).
@@ -30,6 +31,10 @@ function headers(): Record<string, string> {
   return h;
 }
 
+const errorEnvelope = z.object({
+  error: z.object({ code: z.string().regex(/^[A-Z_]{1,50}$/) }),
+});
+
 export class CoreAiError extends Error {
   constructor(
     message: string,
@@ -39,6 +44,17 @@ export class CoreAiError extends Error {
   ) {
     super(message);
     this.name = "CoreAiError";
+  }
+
+  get code(): string | undefined {
+    if (!this.responseBody) return undefined;
+    try {
+      const parsed = errorEnvelope.safeParse(JSON.parse(this.responseBody));
+      return parsed.success ? parsed.data.error.code : undefined;
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+      return undefined;
+    }
   }
 }
 

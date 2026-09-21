@@ -7,6 +7,7 @@ import {
   INQUIRY_STATUS_LABEL,
   type InquiryStatus,
 } from "@/modules/inquiry/service";
+import { inquiryProviderLabel } from "@/modules/inquiry/presentation";
 import { withRevision } from "@/modules/quotation/lib/quotation-number";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +24,7 @@ import {
   InquiryItemRow,
   PilihPelangganCard,
 } from "./permintaan-detail-client";
+import { InquirySourceCard } from "./inquiry-source-card";
 
 export const metadata = { title: "Review Permintaan" };
 
@@ -58,7 +60,7 @@ export default async function PermintaanDetailPage({
         title={inquiry.fileName ?? "Permintaan teks"}
         description={`Masuk ${formatTanggalWaktu(inquiry.createdAt)}${
           inquiry.extractedAt
-            ? ` — diekstrak ${formatTanggalWaktu(inquiry.extractedAt)} (provider mock)`
+            ? ` — diekstrak ${formatTanggalWaktu(inquiry.extractedAt)} (${inquiryProviderLabel(inquiry.extractionProvider)})`
             : ""
         }`}
       >
@@ -68,9 +70,18 @@ export default async function PermintaanDetailPage({
         <InquiryHeaderActions
           inquiryId={inquiry.id}
           hasItems={inquiry.items.length > 0}
+          needsExtraction={inquiry.status === "NEW"}
           quotationId={inquiry.quotation?.id ?? null}
         />
       </PageHeader>
+
+      {inquiry.processingNote && (
+        <Card>
+          <CardContent>
+            <p role="status" className="text-sm">{inquiry.processingNote}</p>
+          </CardContent>
+        </Card>
+      )}
 
       {inquiry.quotation && (
         <Card>
@@ -98,7 +109,7 @@ export default async function PermintaanDetailPage({
               <CardTitle>Item hasil ekstraksi</CardTitle>
               <CardDescription>
                 Review tiap baris: perbaiki nama/qty, cocokkan ke katalog, atau cari
-                vendor untuk barang yang tidak Anda stok. Semua hasil AI (mock) wajib
+                vendor untuk barang yang tidak Anda stok. Semua hasil ekstraksi wajib
                 direview manusia sebelum jadi penawaran.
               </CardDescription>
             </CardHeader>
@@ -149,18 +160,14 @@ export default async function PermintaanDetailPage({
             currentCustomerName={inquiry.customerName}
           />
 
-          {inquiry.rawText && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm">Teks asli permintaan</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-3 text-xs">
-                  {inquiry.rawText}
-                </pre>
-              </CardContent>
-            </Card>
-          )}
+          <InquirySourceCard
+            key={inquiry.updatedAt.toISOString()}
+            inquiryId={inquiry.id}
+            rawText={inquiry.rawText}
+            ocrProvider={inquiry.ocrProvider}
+            ocrPages={inquiry.ocrPages}
+            readOnly={Boolean(inquiry.quotationId)}
+          />
         </div>
       </div>
     </>

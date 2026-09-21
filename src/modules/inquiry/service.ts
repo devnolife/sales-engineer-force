@@ -1,16 +1,18 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, open, unlink } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { getAiProvider } from "@/modules/ai";
 import { extractTextFromFile, isOcrSupported } from "@/modules/ai/ocr";
+import { extractedInquirySchema } from "@/modules/ai/schema";
 import type { OrgScope } from "@/modules/org/service";
 import { createQuotation } from "@/modules/quotation/service";
-import type { MatchCandidate } from "./matching";
+import { bestMatch, type MatchCandidate } from "./matching";
 import { bestMatchesSemantic } from "./matching-semantic";
 
 /**
  * Modul permintaan (inquiry): upload/paste permintaan pelanggan ->
- * ekstraksi item (AI provider, sekarang mock) -> review manusia ->
+ * OCR / ekstraksi item -> review manusia ->
  * konversi jadi draft penawaran.
  *
  * Kebijakan human-in-the-loop (PRD §7.5): hasil ekstraksi SELALU berupa draft
@@ -72,53 +74,100 @@ export async function createInquiryFromFile(
   if (file.bytes.byteLength > MAX_FILE_BYTES) {
     throw new Error("Ukuran file maksimal 5 MB.");
   }
+  if (!file.bytes.byteLength) throw new Error("File permintaan kosong.");
   const safeName = file.name.replace(/[^\w.\- ]+/g, "_").slice(-100);
-  const dir = path.join(UPLOAD_ROOT, scope.orgId);
-  await mkdir(dir, { recursive: true });
-  const fileName = `${Date.now()}-${safeName}`;
-  const filePath = path.join(dir, fileName);
-  await writeFile(filePath, file.bytes);
-
-  // Sumber teks:
-  // - File teks: baca langsung.
-  // - Gambar/PDF: OCR lokal (vision model / text layer) — gagal OCR tidak
-  //   menggagalkan upload; user masih bisa tempel teks manual.
   const ext = path.extname(safeName).toLowerCase();
-  let rawText = "";
-  if (TEXT_EXTENSIONS.has(ext)) {
-    rawText = file.bytes.toString("utf8").slice(0, 20000);
-  } else if (isOcrSupported(ext)) {
-    try {
-      rawText = (await extractTextFromFile(ext, file.bytes)).slice(0, 20000);
-    } catch (e) {
-      console.error(`OCR gagal untuk ${safeName}:`, e);
-    }
+  if (!TEXT_EXTENSIONS.has(ext) && !isOcrSupported(ext)) {
+    throw new Error("Format file belum didukung. Gunakan PDF, PNG, JPG, TXT, CSV, atau MD.");
   }
 
-  return scope.db.inquiry.create({
-    data: {
-      organizationId: scope.orgId,
-      source: "UPLOAD",
-      status: "NEW",
-      fileName: safeName,
-      filePath: path.relative(process.cwd(), filePath),
-      rawText: rawText || null,
-      createdById: userId,
-    },
-  });
+  let rawText: string;
+  let ocrProvider: string;
+  let ocrPages: number | null = null;
+  if (TEXT_EXTENSIONS.has(ext)) {
+    try {
+      rawText = new TextDecoder("utf-8", { fatal: true }).decode(file.bytes).trim();
+    } catch (error) {
+      if (!(error instanceof TypeError)) throw error;
+      throw new Error("File teks harus memakai encoding UTF-8.");
+    }
+    ocrProvider = "text-file";
+  } else {
+    const document = await extractTextFromFile(ext, file.bytes);
+    rawText = document.text;
+    ocrProvider = document.provider;
+    ocrPages = document.pages;
+  }
+  if (!rawText.trim()) throw new Error("Tidak ada teks yang terbaca. Tempel teks permintaan atau gunakan dokumen lebih jelas.");
+  if (rawText.length > 20000) throw new Error("Teks dokumen maksimal 20.000 karakter.");
+
+  const dir = path.join(UPLOAD_ROOT, scope.orgId);
+  const fileName = `${randomUUID()}-${safeName}`;
+  const filePath = path.join(dir, fileName);
+  let ownsFile = false;
+  try {
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+    const handle = await open(filePath, "wx", 0o600);
+    ownsFile = true;
+    try {
+      await handle.writeFile(file.bytes);
+    } finally {
+      await handle.close();
+    }
+    return await scope.db.$transaction(async (tx) => {
+      const inquiry = await tx.inquiry.create({
+        data: {
+          organizationId: scope.orgId, source: "UPLOAD", status: "NEW",
+          fileName: safeName, filePath: path.relative(process.cwd(), filePath),
+          rawText, ocrProvider, ocrPages, createdById: userId,
+        },
+      });
+      await tx.aiLog.create({
+        data: {
+          organizationId: scope.orgId, kind: "DOCUMENT_READ", provider: ocrProvider,
+          inputSummary: `Permintaan ${inquiry.id} (${file.bytes.byteLength} byte)`,
+          outputSummary: `${rawText.length} karakter${ocrPages ? `, ${ocrPages} halaman` : ""}`,
+          createdById: userId,
+        },
+      });
+      return inquiry;
+    });
+  } catch (error) {
+    console.error("Penyimpanan dokumen permintaan gagal.", {
+      kind: error instanceof Error ? error.name : "unknown",
+    });
+    if (ownsFile) {
+      try {
+        await unlink(filePath);
+      } catch (cleanupError) {
+        console.error("Pembersihan dokumen yang gagal disimpan tidak berhasil.", {
+          kind: cleanupError instanceof Error ? cleanupError.name : "unknown",
+        });
+        throw new Error("Dokumen gagal disimpan dan dibersihkan. Hubungi pengelola.");
+      }
+    }
+    throw new Error("Dokumen gagal disimpan. Coba lagi.");
+  }
 }
 
-// ---------- Ekstraksi (AI provider — mock) ----------
+// ---------- Ekstraksi ----------
 
 export async function extractInquiry(scope: OrgScope, userId: string, inquiryId: string) {
   const inquiry = await scope.db.inquiry.findFirst({ where: { id: inquiryId } });
   if (!inquiry) throw new Error("Permintaan tidak ditemukan.");
+  if (!inquiry.rawText?.trim()) throw new Error("Teks permintaan belum tersedia. Tempel teks atau unggah ulang dokumen.");
 
   const provider = getAiProvider();
-  const extracted = await provider.extractInquiry({
-    rawText: inquiry.rawText ?? "",
+  const observation = await provider.extractInquiry({
+    rawText: inquiry.rawText,
     fileName: inquiry.fileName ?? undefined,
   });
+  const parsed = extractedInquirySchema.safeParse(observation);
+  if (!parsed.success) throw new Error("Hasil ekstraksi item tidak valid. Periksa teks permintaan.");
+  const extracted = parsed.data;
+  if (inquiry.source === "UPLOAD" && /^mock(?::|$)/.test(extracted.provider)) {
+    throw new Error("Provider demo tidak digunakan untuk dokumen unggahan. Konfigurasikan ekstraksi lokal.");
+  }
 
   // Kandidat pencocokan: seluruh produk aktif organisasi.
   const products = await scope.db.product.findMany({
@@ -127,17 +176,23 @@ export async function extractInquiry(scope: OrgScope, userId: string, inquiryId:
   });
   const candidates: MatchCandidate[] = products;
 
-  // Ganti item lama (ekstraksi ulang = replace).
-  await scope.db.inquiryItem.deleteMany({ where: { inquiryId } });
-
-  // Matching semantik batch: token + embedding (bge-m3), fallback token-only.
   const queries = extracted.items.map((item) => `${item.name} ${item.spec ?? ""}`);
-  const matches = await bestMatchesSemantic(queries, candidates);
+  const matches = extracted.provider === "local"
+    ? queries.map((query) => bestMatch(query, candidates))
+    : await bestMatchesSemantic(queries, candidates);
+  const note = extracted.note || (extracted.items.length === 0
+    ? "Tidak ada baris barang yang dikenali. Periksa dan perbaiki teks sumber." : undefined);
 
-  for (const [index, item] of extracted.items.entries()) {
-    const match = matches[index] ?? null;
-    await scope.db.inquiryItem.create({
-      data: {
+  const updated = await scope.db.$transaction(async (tx) => {
+    const current = await tx.inquiry.findFirst({ where: { id: inquiryId } });
+    if (!current) throw new Error("Permintaan tidak ditemukan.");
+    if (current.rawText !== inquiry.rawText) {
+      throw new Error("Teks permintaan berubah selama ekstraksi. Jalankan Ekstrak ulang.");
+    }
+    await tx.inquiryItem.deleteMany({ where: { inquiryId, organizationId: scope.orgId } });
+    for (const [index, item] of extracted.items.entries()) {
+      const match = matches[index] ?? null;
+      await tx.inquiryItem.create({ data: {
         organizationId: scope.orgId,
         inquiryId,
         lineNo: index + 1,
@@ -149,36 +204,70 @@ export async function extractInquiry(scope: OrgScope, userId: string, inquiryId:
         matchedProductId: match && match.status !== "UNMATCHED" ? match.productId : null,
         matchStatus: match?.status ?? "UNMATCHED",
         matchScore: match?.score ?? null,
+      } });
+    }
+    const committed = await tx.inquiry.updateMany({
+      where: {
+        id: inquiryId, organizationId: scope.orgId, rawText: inquiry.rawText,
+        updatedAt: current.updatedAt, quotationId: current.quotationId, status: current.status,
+      },
+      data: {
+        status: current.quotationId ? "QUOTED" : extracted.items.length ? "EXTRACTED" : "NEW",
+        extractedAt: extracted.items.length ? new Date() : null,
+        extractionProvider: extracted.provider, processingNote: note ?? null,
+        customerName: current.customerName ?? extracted.customerName ?? null,
       },
     });
-  }
-
-  const updated = await scope.db.inquiry.update({
-    where: { id: inquiryId },
-    data: {
-      status: "EXTRACTED",
-      extractedAt: new Date(),
-      customerName: inquiry.customerName ?? extracted.customerName ?? null,
-    },
+    if (committed.count !== 1) {
+      throw new Error("Permintaan berubah selama ekstraksi. Jalankan Ekstrak ulang.");
+    }
+    await tx.aiLog.create({
+      data: {
+        organizationId: scope.orgId, kind: "INQUIRY_EXTRACTION", provider: extracted.provider,
+        inputSummary: `Permintaan ${inquiry.id} (${inquiry.rawText?.length ?? 0} karakter)`,
+        outputSummary: `${extracted.items.length} item, confidence ${extracted.confidence.toFixed(2)}${note ? ` — ${note}` : ""}`,
+        createdById: userId,
+      },
+    });
+    return tx.inquiry.findFirstOrThrow({ where: { id: inquiryId } });
   });
 
-  // Log AI — bahan evaluasi & bukti human-in-the-loop sejak hari 1.
-  await scope.db.aiLog.create({
-    data: {
-      organizationId: scope.orgId,
-      kind: "INQUIRY_EXTRACTION",
-      provider: extracted.provider,
-      inputSummary: `${inquiry.fileName ?? "teks"} (${(inquiry.rawText ?? "").length} karakter)`,
-      outputSummary: `${extracted.items.length} item, confidence ${extracted.confidence.toFixed(2)}${extracted.note ? ` — ${extracted.note}` : ""
-        }`,
-      createdById: userId,
-    },
-  });
-
-  return { inquiry: updated, note: extracted.note, confidence: extracted.confidence };
+  return { inquiry: updated, note, confidence: extracted.confidence,
+    provider: extracted.provider, itemCount: extracted.items.length };
 }
 
 // ---------- Review ----------
+
+export async function updateInquiryText(
+  scope: OrgScope, userId: string, inquiryId: string, rawText: string,
+) {
+  const inquiry = await scope.db.inquiry.findFirst({ where: { id: inquiryId } });
+  if (!inquiry) throw new Error("Permintaan tidak ditemukan.");
+  if (inquiry.quotationId) throw new Error("Teks permintaan yang sudah menjadi penawaran tidak dapat diubah.");
+  const text = permintaanTeksSchema.shape.rawText.parse(rawText);
+  if (text === inquiry.rawText) return inquiry;
+  return scope.db.$transaction(async (tx) => {
+    const committed = await tx.inquiry.updateMany({
+      where: {
+        id: inquiryId, organizationId: scope.orgId, rawText: inquiry.rawText, quotationId: null,
+      },
+      data: {
+        rawText: text, status: "NEW",
+        processingNote: "Teks sumber diubah. Jalankan Ekstrak ulang; item sebelumnya belum diperbarui.",
+      },
+    });
+    if (committed.count !== 1) {
+      throw new Error("Permintaan berubah atau sudah menjadi penawaran. Muat ulang sebelum menyunting.");
+    }
+    await tx.aiLog.create({ data: {
+      organizationId: scope.orgId, kind: "INQUIRY_TEXT_EDIT", provider: "manual",
+      inputSummary: `Permintaan ${inquiryId}`,
+      outputSummary: `${text.length} karakter; ekstraksi ulang diperlukan`,
+      createdById: userId,
+    } });
+    return tx.inquiry.findFirstOrThrow({ where: { id: inquiryId } });
+  });
+}
 
 export async function updateInquiryItem(
   scope: OrgScope,
@@ -251,6 +340,9 @@ export async function convertInquiryToQuotation(
     include: { items: { orderBy: { lineNo: "asc" } } },
   });
   if (!inquiry) throw new Error("Permintaan tidak ditemukan.");
+  if (inquiry.status === "NEW" && inquiry.items.length > 0) {
+    throw new Error("Jalankan ekstraksi ulang setelah mengubah teks permintaan.");
+  }
   if (inquiry.items.length === 0) {
     throw new Error("Belum ada item. Jalankan ekstraksi dulu.");
   }
@@ -258,53 +350,59 @@ export async function convertInquiryToQuotation(
     throw new Error("Permintaan ini sudah dikonversi menjadi penawaran.");
   }
 
-  const productIds = inquiry.items
-    .map((i) => i.matchedProductId)
-    .filter((v): v is string => Boolean(v));
-  const products = await scope.db.product.findMany({ where: { id: { in: productIds } } });
-  const productById = new Map(products.map((p) => [p.id, p]));
+  return scope.db.$transaction(async (tx) => {
+    const productIds = inquiry.items
+      .map((i) => i.matchedProductId)
+      .filter((v): v is string => Boolean(v));
+    const products = await tx.product.findMany({ where: { id: { in: productIds } } });
+    const productById = new Map(products.map((p) => [p.id, p]));
 
-  const quotation = await createQuotation(scope, userId, {
-    customerId: inquiry.customerId ?? "",
-    customerName: inquiry.customerName ?? "(isi nama pelanggan)",
-    attn: "",
-    subject: `Penawaran atas permintaan ${inquiry.customerName ?? inquiry.fileName ?? "pelanggan"
-      }`,
-    quoteDate: "",
-    franco: "",
-    deliveryTime: "",
-    termsOfPayment: "",
-    priceIncludeNote: "",
-    validityDays: 30,
-    vatPercent: 11,
-    docDiscountType: "AMOUNT",
-    docDiscountValue: "0",
-    notes: `Dibuat dari permintaan ${inquiry.fileName ?? inquiry.id} (ekstraksi ${inquiry.extractedAt?.toISOString() ?? "-"
-      })`,
-    items: inquiry.items.map((item) => {
-      const product = item.matchedProductId
-        ? productById.get(item.matchedProductId)
-        : undefined;
-      return {
-        productId: product?.id ?? "",
-        name: product?.name ?? item.name,
-        brand: product?.brand ?? "",
-        type: product?.type ?? "",
-        spec: product?.spec ?? item.spec ?? "",
-        qty: item.qty,
-        unit: item.unit || product?.unit || "Unit",
-        unitPrice: product?.defaultPrice ?? "0",
-        discountPercent: "0",
-      };
-    }),
+    const quotation = await createQuotation({ orgId: scope.orgId, db: tx }, userId, {
+      customerId: inquiry.customerId ?? "",
+      customerName: inquiry.customerName ?? "(isi nama pelanggan)",
+      attn: "",
+      subject: `Penawaran atas permintaan ${inquiry.customerName ?? inquiry.fileName ?? "pelanggan"
+        }`,
+      quoteDate: "",
+      franco: "",
+      deliveryTime: "",
+      termsOfPayment: "",
+      priceIncludeNote: "",
+      validityDays: 30,
+      vatPercent: 11,
+      docDiscountType: "AMOUNT",
+      docDiscountValue: "0",
+      notes: `Dibuat dari permintaan ${inquiry.fileName ?? inquiry.id} (ekstraksi ${inquiry.extractedAt?.toISOString() ?? "-"
+        })`,
+      items: inquiry.items.map((item) => {
+        const product = item.matchedProductId
+          ? productById.get(item.matchedProductId)
+          : undefined;
+        return {
+          productId: product?.id ?? "",
+          name: product?.name ?? item.name,
+          brand: product?.brand ?? "",
+          type: product?.type ?? "",
+          spec: product?.spec ?? item.spec ?? "",
+          qty: item.qty,
+          unit: item.unit || product?.unit || "Unit",
+          unitPrice: product?.defaultPrice ?? "0",
+          discountPercent: "0",
+        };
+      }),
+    });
+    const committed = await tx.inquiry.updateMany({
+      where: {
+        id: inquiryId, organizationId: scope.orgId, rawText: inquiry.rawText,
+        updatedAt: inquiry.updatedAt, status: inquiry.status, quotationId: null,
+      },
+      data: { status: "QUOTED", quotationId: quotation.id },
+    });
+    if (committed.count !== 1) {
+      throw new Error("Permintaan berubah selama konversi. Review teks dan item sebelum mencoba lagi.");
+    }
+    return quotation;
   });
-
-  await scope.db.inquiry.update({
-    where: { id: inquiryId },
-    data: { status: "QUOTED", quotationId: quotation.id },
-  });
-
-  return quotation;
 }
 
 // ---------- Query ----------

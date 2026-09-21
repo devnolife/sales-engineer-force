@@ -8,6 +8,7 @@ import {
   buatPermintaanTeksAction,
   uploadPermintaanAction,
 } from "@/modules/inquiry/actions";
+import { inquiryProviderLabel } from "@/modules/inquiry/presentation";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -52,7 +53,8 @@ export function PermintaanBaruDialog() {
     startTransition(async () => {
       const result = await buatPermintaanTeksAction({ rawText });
       if (result.ok && result.data) {
-        toast.success("Permintaan dibuat & diekstrak (mock). Silakan review.");
+        if (result.data.warning) toast.warning(result.data.warning);
+        else toast.success(`Permintaan dibuat (${inquiryProviderLabel(result.data.provider)}). Silakan review.`);
         setOpen(false);
         setRawText("");
         router.push(`/app/permintaan/${result.data.id}`);
@@ -69,7 +71,8 @@ export function PermintaanBaruDialog() {
     startTransition(async () => {
       const result = await uploadPermintaanAction(formData);
       if (result.ok && result.data) {
-        toast.success("File diunggah & diekstrak (mock). Silakan review.");
+        if (result.data.warning) toast.warning(result.data.warning);
+        else toast.success(`Dokumen dibaca (${inquiryProviderLabel(result.data.provider)}). Silakan review.`);
         setOpen(false);
         router.push(`/app/permintaan/${result.data.id}`);
         router.refresh();
@@ -80,19 +83,19 @@ export function PermintaanBaruDialog() {
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(value) => { if (!pending) setOpen(value); }}>
       <DialogTrigger asChild>
         <Button>
           <Plus data-icon="inline-start" />
           Permintaan baru
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Permintaan baru</DialogTitle>
           <DialogDescription>
-            Tempel teks permintaan (email/WA) atau upload file. Ekstraksi memakai
-            provider mock — hasilnya selalu untuk direview dulu.
+            Tempel teks permintaan (email/WA) atau upload dokumen untuk dibaca oleh
+            layanan OCR. Hasil ekstraksi selalu berupa draft untuk direview dulu.
           </DialogDescription>
         </DialogHeader>
         <Tabs defaultValue="teks">
@@ -114,6 +117,8 @@ export function PermintaanBaruDialog() {
                 <Textarea
                   id="inq-text"
                   rows={9}
+                  maxLength={20000}
+                  disabled={pending}
                   value={rawText}
                   onChange={(e) => setRawText(e.target.value)}
                   placeholder={CONTOH_TEKS}
@@ -148,19 +153,21 @@ export function PermintaanBaruDialog() {
                     id="inq-file"
                     name="file"
                     type="file"
-                    accept=".txt,.csv,.md,.pdf,.png,.jpg,.jpeg,.xlsx,.docx"
+                    accept=".txt,.text,.csv,.md,.pdf,.png,.jpg,.jpeg"
+                    disabled={pending}
                     required
                   />
                   <FieldDescription>
-                    File teks (.txt/.csv) dibaca isinya. PDF/gambar belum dibaca provider
-                    mock — item contoh akan dibuat agar alur tetap bisa dicoba.
+                    PDF, PNG, atau JPG dibaca melalui OCR; TXT/CSV/MD dibaca langsung.
+                    Maksimal 5 MB, 5 halaman PDF, dan 20.000 karakter teks.
+                    Jika tidak terbaca, tidak ada item contoh yang dibuat.
                   </FieldDescription>
                 </Field>
               </FieldGroup>
               <DialogFooter className="pt-4">
                 <Button type="submit" disabled={pending}>
                   {pending && <Spinner data-icon="inline-start" />}
-                  Upload & ekstrak
+                  {pending ? "Membaca dokumen..." : "Upload & ekstrak"}
                 </Button>
               </DialogFooter>
             </form>

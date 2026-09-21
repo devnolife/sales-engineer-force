@@ -22,6 +22,7 @@ import {
   simpanItemPermintaanAction,
 } from "@/modules/inquiry/actions";
 import { VendorSearchPanel } from "@/components/sourcing/vendor-search-panel";
+import { inquiryProviderLabel } from "@/modules/inquiry/presentation";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -60,10 +61,12 @@ import { Spinner } from "@/components/ui/spinner";
 export function InquiryHeaderActions({
   inquiryId,
   hasItems,
+  needsExtraction,
   quotationId,
 }: {
   inquiryId: string;
   hasItems: boolean;
+  needsExtraction: boolean;
   quotationId: string | null;
 }) {
   const router = useRouter();
@@ -71,7 +74,7 @@ export function InquiryHeaderActions({
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <Button
         variant="outline"
         disabled={pending}
@@ -79,7 +82,11 @@ export function InquiryHeaderActions({
           startTransition(async () => {
             const result = await ekstrakUlangAction(inquiryId);
             if (result.ok) {
-              toast.success("Ekstraksi ulang selesai (mock).");
+              if (result.data?.itemCount === 0) {
+                toast.warning(result.data.note ?? "Tidak ada item yang dikenali. Periksa teks sumber.");
+              } else {
+                toast.success(`Ekstraksi ulang selesai (${inquiryProviderLabel(result.data?.provider)}).`);
+              }
               router.refresh();
             } else {
               toast.error(result.error);
@@ -93,7 +100,7 @@ export function InquiryHeaderActions({
 
       {!quotationId && (
         <Button
-          disabled={pending || !hasItems}
+          disabled={pending || !hasItems || needsExtraction}
           onClick={() =>
             startTransition(async () => {
               const result = await konversiKePenawaranAction(inquiryId);

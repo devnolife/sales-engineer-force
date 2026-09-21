@@ -26,6 +26,10 @@ COPY --from=build --chown=app:app /app/public ./public
 # CLI prisma untuk `db push`/migrate saat deploy
 COPY --from=build --chown=app:app /app/prisma ./prisma
 
+RUN mkdir -p /app/.data/uploads \
+    && chown app:app /app/.data /app/.data/uploads \
+    && chmod 700 /app/.data/uploads
+
 USER app
 EXPOSE 3000
 CMD ["node", "server.js"]

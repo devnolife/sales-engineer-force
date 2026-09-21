@@ -10,6 +10,7 @@ SaaS penjualan end-to-end untuk perusahaan B2B teknik/industri Indonesia — dar
 corepack enable  # gunakan versi pnpm yang dipin di package.json
 cp .env.example .env
 # Ganti BETTER_AUTH_SECRET dengan secret lokal yang kuat.
+# Untuk demo paste tanpa core-ai, kosongkan CORE_AI_URL secara eksplisit.
 pnpm install
 pnpm db:push      # buat SQLite dev.db dari schema
 pnpm db:seed      # isi data demo (atau pnpm db:reset untuk mulai bersih)
@@ -17,7 +18,8 @@ pnpm dev          # http://localhost:3000
 ```
 
 Login demo: `demo@saleskit.id` / `demo1234` (owner) · `sales@saleskit.id` / `demo1234` (sales).
-Contoh alur inquiry: menu **Permintaan** → "Permintaan baru" → "Isi dengan contoh" (atau upload `public/contoh-permintaan.txt`).
+Contoh alur inquiry: menu **Permintaan** → "Permintaan baru" → "Isi dengan contoh".
+Untuk membaca dokumen unggahan tanpa data demo, aktifkan OCR/parser lokal di bawah.
 
 ```bash
 pnpm test                                  # unit test; test DB opt-in
@@ -33,7 +35,8 @@ untuk data contoh; instalasi lama tidak otomatis beralih ke selfhost.
 
 | Titik | Demo/lokal | Integrasi asli / lanjutan | Ditukar di |
 |---|---|---|---|
-| Ekstraksi permintaan → item | Parser heuristik lokal | LLM multimodal (Vercel AI SDK) | `src/modules/ai/` (env `AI_PROVIDER`) |
+| Ekstraksi permintaan → item | Demo mock eksplisit atau parser lokal tanpa LLM | Parser `local` atau Ollama; kegagalan remote tidak menjadi item contoh | `src/modules/ai/`; `AI_PROVIDER` di core-ai |
+| OCR dokumen pengajuan | PDF berteks dibaca langsung | Tesseract lokal (Indonesia/Inggris) atau Ollama Vision eksplisit | `OCR_PROVIDER` di core-ai; `POST /v1/ocr` |
 | Pencocokan item → katalog | Skor token (kode asli, tetap dipakai) | + embedding | `src/modules/inquiry/matching.ts` |
 | Pencarian vendor web | Contoh deterministik berlabel "(mock)" | Firecrawl Cloud v2 atau SearXNG + Crawl4AI/Browser Use, detail on-demand melalui core-ai | App: `SOURCING_MODE` + `SOURCING_LIVE_PROVIDER`; core-ai: `SOURCING_PROVIDER` |
 | Database | SQLite (uang sebagai string desimal + decimal.js) | PostgreSQL (kolom Decimal) | `prisma/schema.prisma` |
@@ -41,6 +44,125 @@ untuk data contoh; instalasi lama tidak otomatis beralih ke selfhost.
 | Email undangan/reminder | Log console + salin tautan | Resend | `src/lib/auth.ts` |
 
 Yang **bukan** mock sejak awal: Better Auth + organization (multi-tenant asli), isolasi tenant via Prisma extension (`src/lib/tenant.ts`, teruji), engine penawaran port dari Metito (penomoran atomik per org+tahun, kalkulasi Decimal + diskon, terbilang, lifecycle draft→issue→revisi dengan snapshot penuh, share link ber-token + view tracking).
+
+## OCR dokumen pengajuan lokal
+
+Menu **Permintaan → Permintaan baru → Upload file** menerima PDF, PNG, JPG/JPEG,
+serta TXT/TEXT/CSV/MD ber-UTF-8. Batas unggahan **5 MB**, PDF **5 halaman**,
+dan teks hasil **20.000 karakter**. Dokumen yang terlalu panjang/rusak/kosong
+ditolak dengan pesan jelas, bukan dipotong atau diganti barang contoh.
+DOCX/XLSX belum mempunyai pembaca dokumen pada alur ini.
+
+Alur: **upload → pembacaan teks/OCR → simpan teks → ekstraksi item → review**.
+PDF campuran diperiksa per halaman; halaman scan memakai OCR. Sumber pembacaan
+(`pdf-text`, `tesseract`, atau `ollama`), jumlah halaman, provider ekstraksi,
+dan catatan disimpan pada inquiry. File teks memakai label `text-file`.
+Jalur Tesseract lokal tidak mengirim dokumen ke Firecrawl atau layanan model Cloud.
+
+Untuk pilihan ringan tanpa mengunduh model besar, jalankan API core-ai lokal
+setelah stack sourcing self-host tersedia:
+
+```bash
+# Di checkout aplikasi, satu kali untuk kunci bersama dan konfigurasi sourcing:
+pnpm setup:selfhost
+cd ../core-ai
+docker compose -p saleskit-sourcing-local -f docker-compose.sourcing.yml up -d --build
+docker compose -p saleskit-core-local -f docker-compose.local.yml up -d --build
+curl --fail http://127.0.0.1:8787/health
+```
+
+Compose API lokal memilih `OCR_PROVIDER=tesseract`, bahasa `ind+eng`,
+`AI_PROVIDER=local`, dan sourcing selfhost secara eksplisit. Port8787 hanya
+loopback; kunci bersama tetap wajib dan tidak dicetak. Ia tidak memakai key
+Firecrawl, Ollama, Browser Use Cloud, atau model LLM. Server/bandwidth/disk
+tetap menggunakan resource. Untuk menjalankan core-ai langsung di host,
+pasang Tesseract + data bahasa Indonesia/Inggris dan Poppler, lalu pilih
+`OCR_PROVIDER=tesseract` serta `AI_PROVIDER=local` di `.env` backend.
+
+Di aplikasi, samakan `CORE_AI_API_KEY`, gunakan
+`CORE_AI_URL=http://127.0.0.1:8787` dan `OCR_REQUEST_TIMEOUT_MS=150000`.
+Sinkronkan penambahan metadata inquiry **pada database yang akan digunakan**
+sebelum menjalankan versi aplikasi baru:
+
+```bash
+pnpm db:push        # SQLite development; jangan diarahkan ke DB lain
+pnpm dev
+# PostgreSQL produksi: ikuti prosedur migrate/db:push:pg yang sudah ada.
+```
+
+Parser `local` hanya mengenali pola qty/satuan yang jelas, misalnya
+`2 unit Pompa dosing` atau `Membran RO 4040 - 4 pcs`. Ia **bukan LLM** dan
+pencocokan katalog pada jalur ini memakai token lokal, tanpa memanggil
+embedding Ollama. Bila tidak ada item yang dikenali, teks tetap tersedia
+dengan status **Baru** dan catatan review; tidak dibuat jumlah/barang contoh.
+Tabel rumit, tata letak banyak kolom, foto buram, dan tulisan tangan dapat
+memerlukan koreksi manual. Periksa khususnya nama/model, qty, satuan, dan
+spesifikasi terhadap dokumen asli. Bila satu halaman memuat lapisan teks
+sekaligus gambar berteks, bagian gambar dapat belum terbaca; periksa kelengkapannya.
+
+Koreksi pada **Teks sumber permintaan → Simpan teks**, lalu **Ekstrak ulang**.
+Dokumen asli tidak berubah. Item lama tetap terlihat tetapi tidak dapat
+dikonversi menjadi penawaran sampai teks terbaru diekstrak. Ekstraksi yang
+gagal atau respons tidak valid tidak menghapus item lama; teks baru yang
+disimpan saat ekstraksi berjalan juga tidak ditimpa hasil yang sudah usang.
+Pembuatan penawaran dan kaitannya ke permintaan disimpan dalam satu transaksi;
+perubahan teks di tengah proses membatalkan penawaran yang memakai item lama.
+Teks permintaan yang sudah menjadi penawaran dikunci, termasuk terhadap
+penyuntingan paralel yang belum selesai.
+
+Jika OCR gagal, upload tidak dianggap berhasil. Jika OCR berhasil tetapi
+ekstraksi item gagal, dokumen tetap dapat dibuka dengan peringatan yang
+tersimpan dan dicoba ulang. Core-ai yang sudah dikonfigurasi tidak diam-diam
+beralih ke parser mock. Demo paste tanpa core-ai tetap berlabel **Demo (mock)**;
+provider demo tidak dipakai untuk dokumen unggahan.
+
+File asli disimpan privat pada `.data/uploads/<organisasi>/`, bukan `public/`,
+dengan izin file0600. Compose produksi menyediakan volume `inquiry-uploads`;
+backup volume tersebut bersama database. Jangan mempublikasikan direktori
+upload atau memasukkan `.env`, dokumen, dan database ke Git.
+
+```bash
+cd ../core-ai
+docker compose -p saleskit-core-local -f docker-compose.local.yml ps
+docker compose -p saleskit-core-local -f docker-compose.local.yml stop
+```
+
+Penghentian API tersebut menonaktifkan OCR dan akses aplikasi ke sourcing,
+bukan memindahkannya ke Cloud. Worker sourcing mempunyai Compose terpisah.
+Pemakaian ulang Ollama tetap pilihan eksplisit, membutuhkan model yang
+tersedia, dan memerlukan penyesuaian timeout; tidak ada fallback OCR otomatis.
+Jalur Ollama mensyaratkan server yang mengembalikan `done: true` dan
+`done_reason: "stop"` untuk respons `/api/chat` non-streaming. Perbarui server
+lama yang belum menyediakan metadata ini; respons tanpa penanda selesai
+ditolak, bukan dianggap teks lengkap. Tesseract/parser lokal tidak membutuhkan Ollama.
+
+### Regresi OCR
+
+Tes upload memakai database SQLite disposable yang sama dengan tes sourcing:
+
+```bash
+DATABASE_URL="file:../.data/sourcing-test.db" pnpm exec prisma db push --skip-generate
+RUN_DB_TESTS=1 DATABASE_URL="file:../.data/sourcing-test.db" pnpm test src/modules/inquiry/ocr.integration.test.ts src/modules/ai/ocr.test.ts src/modules/ai/remote-provider.test.ts src/lib/core-ai.test.ts
+```
+
+Race perubahan teks/ekstraksi/konversi juga diuji pada PostgreSQL nyata, bukan
+transaksi mock atau serialisasi SQLite. Siapkan **PostgreSQL17 disposable**
+di loopback18932 dengan database/user `ocr_review`, password fixture seperti
+URL berikut, dan isolasi bawaan `READ COMMITTED`. Test menolak URL lain.
+Hentikan proses Next/test lain sebelum mengganti client Prisma; jangan
+jalankan perintah ini terhadap database aplikasi.
+
+```bash
+OCR_TEST_DATABASE_URL="postgresql://ocr_review:synthetic-ocr-review-only@127.0.0.1:18932/ocr_review?schema=public&connection_limit=4"
+DATABASE_URL="$OCR_TEST_DATABASE_URL" pnpm exec prisma generate --schema prisma/schema.postgres.prisma
+DATABASE_URL="$OCR_TEST_DATABASE_URL" pnpm exec prisma db push --schema prisma/schema.postgres.prisma --skip-generate
+RUN_PG_RACE_TESTS=1 DATABASE_URL="$OCR_TEST_DATABASE_URL" pnpm test src/modules/inquiry/ocr-concurrency.postgres.test.ts
+# Pulihkan client SQLite meskipun test PostgreSQL gagal:
+pnpm exec prisma generate --schema prisma/schema.prisma
+```
+
+Hapus instance PostgreSQL disposable setelah pengujian. Tidak ada OCR Cloud,
+model Ollama, atau data dokumen pengguna yang diperlukan untuk tes regresi.
 
 ## Sourcing barang dan harga
 

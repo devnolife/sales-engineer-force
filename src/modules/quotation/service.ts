@@ -111,7 +111,12 @@ function normalizeItems(parsed: ReturnType<typeof quotationInputSchema.parse>) {
 
 // ---------- CRUD draft ----------
 
-export async function createQuotation(scope: OrgScope, userId: string, input: QuotationInput) {
+type DraftCreationScope = {
+  orgId: string;
+  db: Pick<OrgScope["db"], "customer" | "quotation">;
+};
+
+export async function createQuotation(scope: DraftCreationScope, userId: string, input: QuotationInput) {
   const parsed = quotationInputSchema.parse(input);
   const vatRate = (parsed.vatPercent / 100).toString();
   const items = normalizeItems(parsed);

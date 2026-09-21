@@ -431,24 +431,28 @@ model QuotationItem {
 }
 
 // ============================================================
-// PERMINTAAN MASUK (inquiry) — upload/paste → ekstraksi (mock AI)
+// PERMINTAAN MASUK (inquiry) — upload/OCR/paste → ekstraksi → review
 // ============================================================
 
 model Inquiry {
-  id             String    @id @default(cuid())
-  organizationId String
-  source         String    @default("UPLOAD") // UPLOAD | PASTE
-  status         String    @default("NEW") // NEW | EXTRACTED | REVIEWED | QUOTED | ARCHIVED
-  customerId     String?
-  customerName   String? // hasil ekstraksi / input manual
-  fileName       String?
-  filePath       String? // path lokal .data/uploads (mock storage)
-  rawText        String? // isi teks permintaan (paste / hasil baca file)
-  extractedAt    DateTime?
-  quotationId    String? // draft penawaran hasil konversi
-  createdById    String
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id                 String    @id @default(cuid())
+  organizationId     String
+  source             String    @default("UPLOAD") // UPLOAD | PASTE
+  status             String    @default("NEW") // NEW | EXTRACTED | REVIEWED | QUOTED | ARCHIVED
+  customerId         String?
+  customerName       String? // hasil ekstraksi / input manual
+  fileName           String?
+  filePath           String? // path privat lokal .data/uploads
+  rawText            String? // isi teks permintaan (paste / hasil baca file)
+  ocrProvider        String? // text-file | pdf-text | tesseract | ollama
+  ocrPages           Int?
+  extractionProvider String? // local | ollama:<model> | mock (demo eksplisit)
+  processingNote     String? // catatan/error aman yang perlu direview
+  extractedAt        DateTime?
+  quotationId        String? // draft penawaran hasil konversi
+  createdById        String
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   items     InquiryItem[]
   quotation Quotation?    @relation(fields: [quotationId], references: [id], onDelete: SetNull)

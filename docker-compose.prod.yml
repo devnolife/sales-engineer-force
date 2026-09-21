@@ -43,6 +43,7 @@ services:
       CRON_SECRET: "${CRON_SECRET:?wajib diisi}"
       CORE_AI_URL: "${CORE_AI_URL:?wajib diisi — URL server AI}"
       CORE_AI_API_KEY: "${CORE_AI_API_KEY:?wajib diisi — samakan dengan server AI}"
+      OCR_REQUEST_TIMEOUT_MS: "${OCR_REQUEST_TIMEOUT_MS:-510000}"
       SOURCING_MODE: "live"
       SOURCING_LIVE_PROVIDER: "${SOURCING_LIVE_PROVIDER-firecrawl}"
       SOURCING_MARGIN_PERCENT: "${SOURCING_MARGIN_PERCENT:-30}"
@@ -53,6 +54,7 @@ services:
       MAIL_FROM: "${MAIL_FROM:-}"
     volumes:
       - pdf-cache:/data/pdf
+      - inquiry-uploads:/app/.data/uploads
     depends_on:
       db:
         condition: service_healthy
@@ -75,3 +77,4 @@ services:
 volumes:
   pgdata:
   pdf-cache:
+  inquiry-uploads:

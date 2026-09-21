@@ -51,7 +51,7 @@ export default async function PermintaanPage({
     <>
       <PageHeader
         title="Permintaan Masuk"
-        description="Upload atau tempel permintaan pelanggan — sistem mengekstrak daftar barang (mock AI), lalu Anda review dan jadikan penawaran."
+        description="Upload dokumen atau tempel permintaan pelanggan, review hasil pembacaan dan daftar barang, lalu jadikan draft penawaran."
       >
         <PermintaanBaruDialog />
       </PageHeader>
