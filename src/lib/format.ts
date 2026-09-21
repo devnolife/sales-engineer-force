@@ -2,6 +2,21 @@ import { Decimal } from "decimal.js";
 
 /** Format helper tampilan (id-ID). Uang dihitung di server dengan decimal.js. */
 
+export function formatCurrency(value: string | number | Decimal, currency: string): string {
+  if (!/^[A-Z]{3}$/.test(currency)) throw new RangeError("Mata uang harus berupa kode eksplisit.");
+  const amount = new Decimal(value);
+  if (!amount.isFinite()) throw new RangeError("Nominal harus berupa angka yang valid.");
+  const formatter = new Intl.NumberFormat("id-ID", currency === "IDR"
+    ? { maximumFractionDigits: 0 }
+    : { style: "currency", currency, currencyDisplay: "code" });
+  const digits = formatter.resolvedOptions().maximumFractionDigits;
+  if (digits === undefined) throw new Error("Format mata uang tidak menentukan jumlah desimal.");
+  const [integer, fraction] = amount.toFixed(digits, Decimal.ROUND_HALF_UP).split(".");
+  const parts = formatter.formatToParts(integer === "-0" ? -0 : BigInt(integer));
+  const formatted = parts.map((part) => part.type === "fraction" ? fraction : part.value).join("");
+  return currency === "IDR" ? `Rp ${formatted}` : formatted;
+}
+
 export function formatRupiah(value: string | number | Decimal): string {
   const d = value instanceof Decimal ? value : new Decimal(value || 0);
   return `Rp ${new Intl.NumberFormat("id-ID", { maximumFractionDigits: 0 }).format(

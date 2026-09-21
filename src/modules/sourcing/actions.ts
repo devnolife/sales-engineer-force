@@ -8,13 +8,15 @@ import {
   createVendor,
   deleteVendor,
   deleteVendorProduct,
+  fetchVendorSourceDetail,
   searchVendorSources,
   updateVendor,
   type VendorInput,
   type VendorProductInput,
-  type VendorSearchResult,
 } from "./service";
-import { scrapeVendorPageDetail, type VendorPageDetail } from "./scrape-detail";
+import { SourcingError } from "./errors";
+import { detailInputSchema, searchInputSchema } from "./schema";
+import type { DetailActionResult, SearchActionResult } from "./types";
 
 export type ActionResult<T = undefined> =
   | { ok: true; data?: T }
@@ -28,17 +30,14 @@ function errMessage(e: unknown, fallback: string): string {
 
 /** Ambil harga & kontak dari halaman toko (on-demand — hemat kuota scrape). */
 export async function ambilDetailTokoAction(
-  url: string,
-): Promise<ActionResult<VendorPageDetail>> {
-  try {
-    await requireOrgContext(); // auth wajib; scrape hanya untuk user login
-    const parsed = z.string().url().parse(url);
-    if (!/^https?:\/\//.test(parsed)) throw new Error("URL tidak valid.");
-    const detail = await scrapeVendorPageDetail(parsed);
-    return { ok: true, data: detail };
-  } catch (e) {
-    return { ok: false, error: errMessage(e, "Gagal membaca halaman toko.") };
+  input: { searchId: string; resultId: string },
+): Promise<DetailActionResult> {
+  const ctx = await requireOrgContext();
+  const parsed = detailInputSchema.safeParse(input);
+  if (!parsed.success) {
+    return { status: "error", error: new SourcingError("INVALID_INPUT").toSourceError() };
   }
+  return fetchVendorSourceDetail(ctx, ctx.userId, parsed.data);
 }
 
 export async function simpanVendorAction(
@@ -95,12 +94,11 @@ export async function hapusProdukVendorAction(id: string): Promise<ActionResult>
 export async function cariVendorAction(
   query: string,
   inquiryItemId?: string,
-): Promise<ActionResult<{ results: VendorSearchResult[] }>> {
-  try {
-    const ctx = await requireOrgContext();
-    const results = await searchVendorSources(ctx, ctx.userId, query, inquiryItemId);
-    return { ok: true, data: { results } };
-  } catch (e) {
-    return { ok: false, error: errMessage(e, "Pencarian vendor gagal.") };
+): Promise<SearchActionResult> {
+  const ctx = await requireOrgContext();
+  const parsed = searchInputSchema.safeParse({ query, inquiryItemId });
+  if (!parsed.success) {
+    return { status: "error", error: new SourcingError("INVALID_INPUT").toSourceError() };
   }
+  return searchVendorSources(ctx, ctx.userId, parsed.data.query, parsed.data.inquiryItemId);
 }

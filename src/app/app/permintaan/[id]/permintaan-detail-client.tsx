@@ -7,7 +7,6 @@ import {
   FileOutput,
   RefreshCw,
   Save,
-  Search,
   Store,
   Trash2,
 } from "lucide-react";
@@ -22,8 +21,7 @@ import {
   setPelangganPermintaanAction,
   simpanItemPermintaanAction,
 } from "@/modules/inquiry/actions";
-import { cariVendorAction } from "@/modules/sourcing/actions";
-import type { VendorSearchResult } from "@/modules/sourcing/service";
+import { VendorSearchPanel } from "@/components/sourcing/vendor-search-panel";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -56,14 +54,6 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 
 // ---------- Aksi header (ekstrak ulang, konversi, hapus) ----------
 
@@ -452,22 +442,6 @@ function ItemVendorSearch({
   defaultQuery: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [pending, startTransition] = useTransition();
-  const [query, setQuery] = useState(defaultQuery);
-  const [results, setResults] = useState<VendorSearchResult[] | null>(null);
-
-  function cari() {
-    startTransition(async () => {
-      const result = await cariVendorAction(query, itemId);
-      if (result.ok && result.data) {
-        setResults(result.data.results);
-      } else if (!result.ok) {
-        toast.error(result.error);
-      }
-    });
-  }
-
-  const adaWebMock = results?.some((r) => r.sourceType === "WEB_MOCK") ?? false;
 
   return (
     <>
@@ -475,112 +449,19 @@ function ItemVendorSearch({
         variant="ghost"
         size="icon-sm"
         aria-label="Cari vendor untuk barang ini"
-        onClick={() => {
-          setQuery(defaultQuery);
-          setResults(null);
-          setOpen(true);
-        }}
+        onClick={() => setOpen(true)}
       >
         <Store />
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle>Cari vendor: {defaultQuery}</DialogTitle>
             <DialogDescription>
               Urutan sumber: pricelist internal dulu (paling akurat), lalu web.
             </DialogDescription>
           </DialogHeader>
-          <div className="flex gap-2">
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Kata kunci barang…"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  cari();
-                }
-              }}
-            />
-            <Button onClick={cari} disabled={pending || query.trim().length < 3}>
-              {pending ? <Spinner data-icon="inline-start" /> : <Search data-icon="inline-start" />}
-              Cari
-            </Button>
-          </div>
-
-          {results !== null && (
-            <div className="flex flex-col gap-2">
-              {results.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  Tidak ada hasil. Tambahkan vendor + pricelist di menu Vendor.
-                </p>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Sumber</TableHead>
-                      <TableHead>Vendor</TableHead>
-                      <TableHead>Produk</TableHead>
-                      <TableHead className="text-right">Modal</TableHead>
-                      <TableHead className="text-right">Jual (+30%)</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {results.map((r, i) => (
-                      <TableRow key={i}>
-                        <TableCell>
-                          <Badge
-                            variant={r.sourceType === "INTERNAL" ? "secondary" : "outline"}
-                          >
-                            {r.sourceType === "INTERNAL"
-                              ? "Internal"
-                              : r.sourceType === "WEB"
-                                ? "Web"
-                                : "Web (mock)"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div className="grid gap-0.5">
-                            {r.sourceUrl ? (
-                              <a
-                                href={r.sourceUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="underline-offset-4 hover:underline"
-                              >
-                                {r.vendorName}
-                              </a>
-                            ) : (
-                              <span>{r.vendorName}</span>
-                            )}
-                            {(r.contact || r.city) && (
-                              <span className="text-xs text-muted-foreground">
-                                {[r.city, r.contact].filter(Boolean).join(" · ")}
-                              </span>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell className="max-w-48 truncate">{r.productName}</TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {r.price ? `${formatRupiah(r.price)}/${r.unit ?? "Unit"}` : "-"}
-                        </TableCell>
-                        <TableCell className="text-right font-medium tabular-nums">
-                          {r.suggestedPrice ? formatRupiah(r.suggestedPrice) : "-"}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-              {adaWebMock && (
-                <p className="text-xs text-muted-foreground">
-                  Hasil berlabel (mock) adalah data contoh — bukan harga nyata. Aktifkan
-                  pencarian nyata: SOURCING_PROVIDER=firecrawl + FIRECRAWL_API_KEY di .env.
-                </p>
-              )}
-            </div>
-          )}
+          <VendorSearchPanel defaultQuery={defaultQuery} inquiryItemId={itemId} />
         </DialogContent>
       </Dialog>
     </>

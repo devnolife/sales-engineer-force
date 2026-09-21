@@ -1,42 +1,24 @@
+import { randomUUID } from "node:crypto";
+import { Prisma } from "@prisma/client";
+import { Decimal } from "decimal.js";
 import { z } from "zod";
+import { rateLimit } from "@/lib/rate-limit";
 import type { OrgScope } from "@/modules/org/service";
 import { normalizeTokens } from "@/modules/inquiry/matching";
-import { coreAiPost, isCoreAiEnabled } from "@/lib/core-ai";
+import { SourcingError, toSourceError } from "./errors";
 import { MockSourcingProvider } from "./mock-provider";
-import type { SourcingProvider, VendorSearchResult } from "./types";
+import { RemoteSourcingProvider, sourcingMode } from "./remote-provider";
+import { detailInputSchema, positivePriceSchema, searchInputSchema, vendorResultSchema } from "./schema";
+import { scrapeVendorPageDetail } from "./scrape-detail";
+import type {
+  DetailActionResult, SearchActionResult, SourceError, SourcingCandidate, SourcingEngine,
+  SourcingProvider, VendorSearchResult,
+} from "./types";
 
 export type { VendorSearchResult } from "./types";
 
-/**
- * Modul sourcing: database vendor internal (+ pricelist) dan pencarian
- * gabungan: internal DULU (paling akurat), lalu web.
- *
- * Pencarian web kini dilakukan oleh service core-ai (provider mock/firecrawl
- * dipilih via env di core-ai). Tanpa CORE_AI_URL: fallback mock lokal.
- */
-
-class RemoteSourcingProvider implements SourcingProvider {
-  readonly name = "core-ai";
-  private fallback = new MockSourcingProvider();
-
-  async searchWeb(query: string): Promise<VendorSearchResult[]> {
-    try {
-      const { results } = await coreAiPost<{ provider: string; results: VendorSearchResult[] }>(
-        "/v1/sourcing/search",
-        { query },
-        { timeoutMs: 45_000 },
-      );
-      return results;
-    } catch (e) {
-      console.error("core-ai sourcing search gagal — fallback ke mock lokal:", e);
-      return this.fallback.searchWeb(query);
-    }
-  }
-}
-
 export function getSourcingProvider(): SourcingProvider {
-  if (isCoreAiEnabled()) return new RemoteSourcingProvider();
-  return new MockSourcingProvider();
+  return sourcingMode() === "mock" ? new MockSourcingProvider() : new RemoteSourcingProvider();
 }
 
 // ---------- Vendor CRUD ----------
@@ -137,7 +119,9 @@ export async function deleteVendorProduct(scope: OrgScope, id: string) {
   return scope.db.vendorProduct.delete({ where: { id } });
 }
 
-// ---------- Pencarian gabungan (internal + web mock) ----------
+// ---------- Pencarian gabungan (internal + web) ----------
+
+const Money = Decimal.clone({ precision: 80, rounding: Decimal.ROUND_HALF_UP });
 
 /** Margin jual default di atas harga modal (%). Override: SOURCING_MARGIN_PERCENT. */
 export function defaultMarginPercent(): number {
@@ -147,11 +131,40 @@ export function defaultMarginPercent(): number {
 
 /** Harga jual saran = modal × (1 + margin), dibulatkan ke ribuan terdekat. */
 export function suggestSellPrice(costPrice: string | undefined, marginPercent: number): string | undefined {
-  if (!costPrice) return undefined;
-  const cost = Number(costPrice);
-  if (!Number.isFinite(cost) || cost <= 0) return undefined;
-  const sell = cost * (1 + marginPercent / 100);
-  return String(Math.round(sell / 1000) * 1000);
+  const price = positivePriceSchema.safeParse(costPrice);
+  if (!price.success ||
+    !Number.isFinite(marginPercent) || marginPercent < 0 || marginPercent > 500) return undefined;
+  const sell = new Money(price.data)
+    .mul(new Money(marginPercent).div(100).plus(1))
+    .div(1000).round().mul(1000);
+  return sell.gt(0) ? sell.toFixed(0) : undefined;
+}
+
+function toStoredResult(
+  candidate: SourcingCandidate,
+  marginPercent: number,
+  id: string = randomUUID(),
+): VendorSearchResult {
+  const suggestion = candidate.priceStatus === "available" && candidate.currency === "IDR"
+    ? suggestSellPrice(candidate.price, marginPercent) : undefined;
+  return vendorResultSchema.parse({
+    ...candidate,
+    id,
+    ...(suggestion ? { suggestedPrice: suggestion, marginPercent } : {}),
+  });
+}
+
+async function requireInquiryOwnership(scope: OrgScope, inquiryItemId?: string | null) {
+  if (inquiryItemId && !await scope.db.inquiryItem.findFirst({
+    where: { id: inquiryItemId }, select: { id: true },
+  })) {
+    throw new SourcingError("NOT_FOUND");
+  }
+}
+
+function checkLimit(orgId: string, operation: "search" | "detail") {
+  const result = rateLimit(`sourcing:${operation}:${orgId}`, operation === "search" ? 10 : 20, 60_000);
+  if (!result.ok) throw new SourcingError("RATE_LIMITED", { retryAfterSeconds: result.retryAfterSec });
 }
 
 export async function searchVendorSources(
@@ -159,66 +172,168 @@ export async function searchVendorSources(
   userId: string,
   query: string,
   inquiryItemId?: string,
-): Promise<VendorSearchResult[]> {
-  const q = query.trim();
-  if (q.length < 3) return [];
+): Promise<SearchActionResult> {
+  try {
+    const input = searchInputSchema.parse({ query, inquiryItemId });
+    await requireInquiryOwnership(scope, input.inquiryItemId);
+    const marginPercent = defaultMarginPercent();
+    const tokens = normalizeTokens(input.query).slice(0, 5);
+    const internal = await scope.db.vendorProduct.findMany({
+      where: tokens.length > 0
+        ? { OR: tokens.map((token) => ({ name: { contains: token } })) }
+        : { name: { contains: input.query } },
+      include: { vendor: { select: { name: true, city: true, phone: true, email: true } } },
+      take: 10,
+      orderBy: { updatedAt: "desc" },
+    });
+    const internalResults = internal.map((product) => {
+      const currency = product.currency.trim().toUpperCase();
+      const available = positivePriceSchema.safeParse(product.price).success && /^[A-Z]{3}$/.test(currency);
+      return toStoredResult({
+        vendorName: product.vendor.name,
+        productName: product.name,
+        brand: product.brand || undefined,
+        priceStatus: available ? "available" : "unavailable",
+        price: available ? new Money(product.price).toFixed() : undefined,
+        currency: available ? currency : undefined,
+        unit: product.unit || undefined,
+        city: product.vendor.city || undefined,
+        contact: [product.vendor.phone, product.vendor.email].filter(Boolean).join(" · ") || undefined,
+        sourceType: "INTERNAL",
+        sourceLabel: "Pricelist internal",
+        retrievedAt: product.updatedAt.toISOString(),
+        evidence: { method: "internal-pricelist", productTitle: product.name },
+        note: available ? undefined : "Harga atau mata uang pricelist belum valid. Periksa data vendor.",
+      }, marginPercent);
+    });
 
-  const margin = defaultMarginPercent();
+    let provider: SourcingEngine = "firecrawl";
+    let webResults: VendorSearchResult[] = [];
+    let webError: SourceError | undefined;
+    try {
+      const adapter = getSourcingProvider();
+      provider = adapter.name;
+      if (provider === "firecrawl") checkLimit(scope.orgId, "search");
+      webResults = (await adapter.searchWeb(input.query)).map((candidate) =>
+        toStoredResult(candidate, marginPercent));
+    } catch (error) {
+      webError = toSourceError(error);
+    }
+    const results = [...internalResults, ...webResults];
+    const status = webError ? "partial" : "complete";
+    const search = await scope.db.$transaction(async (tx) => {
+      const snapshot = await tx.sourcingSearch.create({
+        data: {
+          organizationId: scope.orgId, query: input.query, provider,
+          resultsJson: JSON.stringify(results),
+          inquiryItemId: input.inquiryItemId ?? null, createdById: userId,
+        },
+        select: { id: true },
+      });
+      await tx.aiLog.create({
+        data: {
+          organizationId: scope.orgId, kind: "VENDOR_SEARCH", provider,
+          inputSummary: input.query,
+          outputSummary: `${status}; ${internalResults.length} internal + ${webResults.length} web${webError ? `; ${webError.code}` : ""}`,
+          createdById: userId,
+        },
+      });
+      return snapshot;
+    });
+    const data = { searchId: search.id, provider, marginPercent, results };
+    return webError ? { status: "partial", data, error: webError } : { status: "complete", data };
+  } catch (error) {
+    return { status: "error", error: toSourceError(error, "PERSISTENCE_FAILED") };
+  }
+}
 
-  // 1) Internal: pricelist vendor — cari per token supaya fleksibel.
-  const tokens = normalizeTokens(q).slice(0, 5);
-  const internal = await scope.db.vendorProduct.findMany({
-    where:
-      tokens.length > 0
-        ? { OR: tokens.map((t) => ({ name: { contains: t } })) }
-        : { name: { contains: q } },
-    include: { vendor: { select: { name: true, city: true, phone: true, email: true } } },
-    take: 10,
-    orderBy: { updatedAt: "desc" },
-  });
+function storedResults(resultsJson: string): VendorSearchResult[] {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(resultsJson);
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new SourcingError("NOT_ALLOWED");
+    throw error;
+  }
+  const parsed = z.array(vendorResultSchema).max(15).safeParse(raw);
+  if (!parsed.success || new Set(parsed.data.map((r) => r.id)).size !== parsed.data.length) {
+    throw new SourcingError("NOT_ALLOWED");
+  }
+  return parsed.data;
+}
 
-  const internalResults: VendorSearchResult[] = internal.map((vp) => ({
-    vendorName: vp.vendor.name,
-    productName: vp.name,
-    price: vp.price,
-    suggestedPrice: suggestSellPrice(vp.price, margin),
-    unit: vp.unit,
-    city: vp.vendor.city ?? undefined,
-    contact: [vp.vendor.phone, vp.vendor.email].filter(Boolean).join(" · ") || undefined,
-    sourceType: "INTERNAL",
-    sourceLabel: "Pricelist internal",
-  }));
+function storedWebResult(results: VendorSearchResult[], resultId: string, provider: string) {
+  const result = results.find((candidate) => candidate.id === resultId);
+  if (!result) throw new SourcingError("NOT_FOUND");
+  if (provider !== "firecrawl" || result.sourceType !== "WEB" || !result.sourceUrl) {
+    throw new SourcingError("NOT_ALLOWED");
+  }
+  return { ...result, sourceUrl: result.sourceUrl };
+}
 
-  // 2) Web (provider mock).
-  const provider = getSourcingProvider();
-  const webResults = (await provider.searchWeb(q)).map((r) => ({
-    ...r,
-    suggestedPrice: r.suggestedPrice ?? suggestSellPrice(r.price, margin),
-  }));
+export async function fetchVendorSourceDetail(
+  scope: OrgScope,
+  userId: string,
+  input: { searchId: string; resultId: string },
+): Promise<DetailActionResult> {
+  try {
+    const params = detailInputSchema.parse(input);
+    const snapshot = await scope.db.sourcingSearch.findFirst({ where: { id: params.searchId } });
+    if (!snapshot) throw new SourcingError("NOT_FOUND");
+    const result = storedWebResult(storedResults(snapshot.resultsJson), params.resultId, snapshot.provider);
+    await requireInquiryOwnership(scope, snapshot.inquiryItemId);
+    if (sourcingMode() !== "live") throw new SourcingError("NOT_ALLOWED");
+    checkLimit(scope.orgId, "detail");
 
-  const results = [...internalResults, ...webResults];
+    let observation: SourcingCandidate;
+    try {
+      observation = await scrapeVendorPageDetail({ query: snapshot.query, url: result.sourceUrl });
+    } catch (error) {
+      const failure = toSourceError(error);
+      await scope.db.aiLog.create({
+        data: {
+          organizationId: scope.orgId, kind: "VENDOR_DETAIL", provider: "firecrawl",
+          inputSummary: snapshot.query, outputSummary: `error; ${failure.code}`,
+          createdById: userId,
+        },
+      });
+      return { status: "error", error: failure };
+    }
+    const updatedResult = toStoredResult(observation, defaultMarginPercent(), params.resultId);
 
-  // Log pencarian + AI log (jejak pemakaian, kuota nanti).
-  await scope.db.sourcingSearch.create({
-    data: {
-      organizationId: scope.orgId,
-      query: q,
-      provider: provider.name,
-      resultsJson: JSON.stringify(results),
-      inquiryItemId: inquiryItemId ?? null,
-      createdById: userId,
-    },
-  });
-  await scope.db.aiLog.create({
-    data: {
-      organizationId: scope.orgId,
-      kind: "VENDOR_SEARCH",
-      provider: provider.name,
-      inputSummary: q,
-      outputSummary: `${internalResults.length} internal + ${webResults.length} web (mock)`,
-      createdById: userId,
-    },
-  });
-
-  return results;
+    // Retry only the database merge; the paid detail request has already finished.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const latest = attempt === 0 ? snapshot
+        : await scope.db.sourcingSearch.findFirst({ where: { id: params.searchId } });
+      if (!latest) throw new SourcingError("NOT_FOUND");
+      const results = storedResults(latest.resultsJson);
+      storedWebResult(results, params.resultId, latest.provider);
+      const next = results.map((candidate) => candidate.id === params.resultId ? updatedResult : candidate);
+      try {
+        const written = await scope.db.$transaction(async (tx) => {
+          const update = await tx.sourcingSearch.updateMany({
+            where: { id: params.searchId, organizationId: scope.orgId, resultsJson: latest.resultsJson },
+            data: { resultsJson: JSON.stringify(next) },
+          });
+          if (update.count !== 1) return false;
+          await tx.aiLog.create({
+            data: {
+              organizationId: scope.orgId, kind: "VENDOR_DETAIL", provider: "firecrawl",
+              inputSummary: latest.query,
+              outputSummary: `complete; ${updatedResult.priceStatus}${updatedResult.currency ? `; ${updatedResult.currency}` : ""}`,
+              createdById: userId,
+            },
+          });
+          return true;
+        });
+        if (written) return { status: "complete", result: updatedResult };
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") continue;
+        throw error;
+      }
+    }
+    throw new SourcingError("PERSISTENCE_FAILED");
+  } catch (error) {
+    return { status: "error", error: toSourceError(error, "PERSISTENCE_FAILED") };
+  }
 }

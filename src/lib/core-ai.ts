@@ -7,7 +7,7 @@ import { Agent, fetch as undiciFetch } from "undici";
  *
  * Env:
  * - CORE_AI_URL     : base URL service (mis. http://localhost:8787).
- *                     Kosong = fitur remote nonaktif (fallback lokal/mock).
+ *                     Kosong = remote nonaktif; sourcing live memberi error konfigurasi.
  * - CORE_AI_API_KEY : opsional, dikirim sebagai Bearer token.
  */
 
@@ -30,7 +30,17 @@ function headers(): Record<string, string> {
   return h;
 }
 
-export class CoreAiError extends Error { }
+export class CoreAiError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+    readonly responseBody?: string,
+    readonly retryAfter?: string | null,
+  ) {
+    super(message);
+    this.name = "CoreAiError";
+  }
+}
 
 /** POST JSON -> JSON. Throw CoreAiError bila core-ai tidak diset / gagal. */
 export async function coreAiPost<T>(
@@ -49,8 +59,11 @@ export async function coreAiPost<T>(
     signal: AbortSignal.timeout(opts.timeoutMs ?? 120_000),
   });
   if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new CoreAiError(`core-ai ${path} gagal (${res.status}): ${detail.slice(0, 300)}`);
+    const detail = await res.text();
+    throw new CoreAiError(
+      `core-ai ${path} gagal (${res.status}): ${detail.slice(0, 300)}`,
+      res.status, detail, res.headers.get("retry-after"),
+    );
   }
   return (await res.json()) as T;
 }
@@ -72,8 +85,11 @@ export async function coreAiPostBinary(
     signal: AbortSignal.timeout(opts.timeoutMs ?? 60_000),
   });
   if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new CoreAiError(`core-ai ${path} gagal (${res.status}): ${detail.slice(0, 300)}`);
+    const detail = await res.text();
+    throw new CoreAiError(
+      `core-ai ${path} gagal (${res.status}): ${detail.slice(0, 300)}`,
+      res.status, detail, res.headers.get("retry-after"),
+    );
   }
   return Buffer.from(await res.arrayBuffer());
 }

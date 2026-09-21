@@ -1,0 +1,89 @@
+{
+  "search": {
+    "provider": "firecrawl",
+    "results": [
+      {
+        "vendorName": "supplier.example",
+        "productName": "Pompa dosing 5 LPH",
+        "sourceType": "WEB",
+        "sourceLabel": "Web (Firecrawl)",
+        "sourceUrl": "https://supplier.example/products/pump",
+        "priceStatus": "pending"
+      }
+    ]
+  },
+  "detailIdr": {
+    "provider": "firecrawl",
+    "result": {
+      "vendorName": "supplier.example",
+      "productName": "Pompa dosing 5 LPH",
+      "sourceType": "WEB",
+      "sourceLabel": "Web (Firecrawl)",
+      "sourceUrl": "https://supplier.example/products/pump",
+      "priceStatus": "available",
+      "price": "1250000",
+      "currency": "IDR",
+      "retrievedAt": "2026-09-01T00:00:00.000Z",
+      "evidence": {
+        "method": "firecrawl-product",
+        "productUrl": "https://supplier.example/products/pump",
+        "productTitle": "Pompa dosing 5 LPH",
+        "variantId": "pump-5",
+        "rawPriceText": "Rp 1.250.000"
+      }
+    }
+  },
+  "detailUsd": {
+    "provider": "firecrawl",
+    "result": {
+      "vendorName": "supplier.example",
+      "productName": "Dosing pump",
+      "sourceType": "WEB",
+      "sourceLabel": "Web (Firecrawl)",
+      "sourceUrl": "https://supplier.example/products/pump-usd",
+      "priceStatus": "available",
+      "price": "99.90",
+      "currency": "USD",
+      "retrievedAt": "2026-09-01T00:00:00.000Z",
+      "evidence": {
+        "method": "firecrawl-product",
+        "productUrl": "https://supplier.example/products/pump-usd",
+        "productTitle": "Dosing pump",
+        "rawPriceText": "$99.90"
+      }
+    }
+  },
+  "detailUnavailable": {
+    "provider": "firecrawl",
+    "result": {
+      "vendorName": "supplier.example",
+      "productName": "Pompa dosing 5 LPH",
+      "sourceType": "WEB",
+      "sourceLabel": "Web (Firecrawl)",
+      "sourceUrl": "https://supplier.example/products/pump",
+      "priceStatus": "unavailable",
+      "retrievedAt": "2026-09-01T00:00:00.000Z",
+      "note": "Harga tidak tersedia pada sumber."
+    }
+  },
+  "detailAmbiguous": {
+    "provider": "firecrawl",
+    "result": {
+      "vendorName": "supplier.example",
+      "productName": "Pompa dosing",
+      "sourceType": "WEB",
+      "sourceLabel": "Web (Firecrawl)",
+      "sourceUrl": "https://supplier.example/products/pumps",
+      "priceStatus": "ambiguous",
+      "retrievedAt": "2026-09-01T00:00:00.000Z",
+      "note": "Terdapat beberapa varian. Periksa harga pada sumber."
+    }
+  },
+  "rateLimited": {
+    "error": {
+      "code": "RATE_LIMITED",
+      "message": "Batas pencarian web tercapai. Coba lagi nanti.",
+      "retryAfterSeconds": 60
+    }
+  }
+}

@@ -2,7 +2,7 @@
 # Service AI (core-ai + Gotenberg) berjalan di server TERPISAH
 # (repo https://github.com/devnolife/sales-engineer-ai, docker-compose.prod.yml di sana).
 #
-# Jalankan: docker compose -f docker-compose.prod.yml up -d
+# Jalankan: docker compose --env-file .env.production -f docker-compose.prod.yml up -d
 # HTTPS: pasang reverse proxy (Caddy/nginx) di depan port 3000.
 #
 # WAJIB diisi via .env.production (tidak ada fallback hardcoded — pelajaran Metito):
@@ -16,7 +16,7 @@
 # (default: NEXT_PUBLIC_APP_URL). Route print tetap terlindungi print key.
 services:
   # Sinkronisasi schema DB (jalankan manual saat deploy/upgrade):
-  #   docker compose -f docker-compose.prod.yml run --rm migrate
+  #   docker compose --env-file .env.production -f docker-compose.prod.yml run --rm migrate
   migrate:
     build:
       context: .
@@ -42,6 +42,8 @@ services:
       CRON_SECRET: "${CRON_SECRET:?wajib diisi}"
       CORE_AI_URL: "${CORE_AI_URL:?wajib diisi — URL server AI}"
       CORE_AI_API_KEY: "${CORE_AI_API_KEY:?wajib diisi — samakan dengan server AI}"
+      SOURCING_MODE: "live"
+      SOURCING_MARGIN_PERCENT: "${SOURCING_MARGIN_PERCENT:-30}"
       INTERNAL_APP_URL: "${INTERNAL_APP_URL:-${NEXT_PUBLIC_APP_URL}}"
       PDF_CACHE_DIR: "/data/pdf"
       MAIL_PROVIDER: "${MAIL_PROVIDER:-mock}"

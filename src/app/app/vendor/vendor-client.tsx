@@ -7,20 +7,17 @@ import {
   Package,
   Pencil,
   Plus,
-  ScanSearch,
   Search,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
-  ambilDetailTokoAction,
-  cariVendorAction,
   hapusProdukVendorAction,
   hapusVendorAction,
   simpanVendorAction,
   tambahProdukVendorAction,
 } from "@/modules/sourcing/actions";
-import type { VendorSearchResult } from "@/modules/sourcing/types";
+import { VendorSearchPanel } from "@/components/sourcing/vendor-search-panel";
 import { formatRupiah } from "@/lib/format";
 import {
   AlertDialog,
@@ -32,7 +29,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -58,14 +54,6 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group";
 import { Spinner } from "@/components/ui/spinner";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 
 interface VendorValue {
@@ -490,58 +478,10 @@ export function ProdukVendorDialog({
   );
 }
 
-// ---------- Dialog pencarian vendor (internal + web mock) ----------
+// ---------- Dialog pencarian vendor ----------
 
 export function CariVendorDialog() {
   const [open, setOpen] = useState(false);
-  const [pending, startTransition] = useTransition();
-  const [results, setResults] = useState<VendorSearchResult[] | null>(null);
-  const [detailPendingUrl, setDetailPendingUrl] = useState<string | null>(null);
-
-  function ambilDetail(index: number, url: string) {
-    setDetailPendingUrl(url);
-    startTransition(async () => {
-      const result = await ambilDetailTokoAction(url);
-      setDetailPendingUrl(null);
-      if (result.ok && result.data) {
-        const d = result.data;
-        setResults((prev) =>
-          prev
-            ? prev.map((r, i) =>
-              i === index
-                ? {
-                  ...r,
-                  price: d.price ?? r.price,
-                  suggestedPrice: d.suggestedPrice ?? r.suggestedPrice,
-                  contact: d.contact ?? r.contact,
-                }
-                : r,
-            )
-            : prev,
-        );
-        if (d.note) toast.info(d.note);
-        else toast.success("Detail halaman toko terbaca.");
-      } else if (!result.ok) {
-        toast.error(result.error);
-      }
-    });
-  }
-
-  function onCari(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const query = String(new FormData(e.currentTarget).get("q") ?? "").trim();
-    if (!query) return;
-    startTransition(async () => {
-      const result = await cariVendorAction(query);
-      if (result.ok && result.data) {
-        setResults(result.data.results);
-      } else if (!result.ok) {
-        toast.error(result.error);
-      }
-    });
-  }
-
-  const hasMock = (results ?? []).some((r) => r.sourceType === "WEB_MOCK");
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -551,7 +491,7 @@ export function CariVendorDialog() {
           Cari vendor
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle>Cari vendor</DialogTitle>
           <DialogDescription>
@@ -560,116 +500,7 @@ export function CariVendorDialog() {
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={onCari} className="flex items-center gap-2">
-          <Input
-            name="q"
-            placeholder="mis. pompa dosing 5 LPH"
-            aria-label="Kata kunci pencarian vendor"
-          />
-          <Button type="submit" disabled={pending}>
-            {pending ? (
-              <Spinner data-icon="inline-start" />
-            ) : (
-              <Search data-icon="inline-start" />
-            )}
-            Cari
-          </Button>
-        </form>
-
-        {results !== null &&
-          (results.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Tidak ada hasil untuk kata kunci itu.
-            </p>
-          ) : (
-            <div className="flex flex-col gap-2">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Sumber</TableHead>
-                    <TableHead>Vendor</TableHead>
-                    <TableHead>Produk</TableHead>
-                    <TableHead className="text-right">Modal</TableHead>
-                    <TableHead className="text-right">Jual (+30%)</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {results.map((r, i) => (
-                    <TableRow key={`${r.sourceType}-${i}`}>
-                      <TableCell>
-                        <Badge
-                          variant={r.sourceType === "INTERNAL" ? "secondary" : "outline"}
-                        >
-                          {r.sourceType === "INTERNAL"
-                            ? "Internal"
-                            : r.sourceType === "WEB"
-                              ? "Web"
-                              : "Web (mock)"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="max-w-48">
-                        <div className="grid gap-0.5">
-                          {r.sourceUrl ? (
-                            <a
-                              href={r.sourceUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="truncate underline-offset-4 hover:underline"
-                            >
-                              {r.vendorName}
-                            </a>
-                          ) : (
-                            <span className="truncate">{r.vendorName}</span>
-                          )}
-                          {(r.contact || r.city) && (
-                            <span className="truncate text-xs text-muted-foreground">
-                              {[r.city, r.contact].filter(Boolean).join(" · ")}
-                            </span>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="max-w-64">
-                        <span className="block truncate">{r.productName}</span>
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {r.price
-                          ? `${formatRupiah(r.price)}/${r.unit ?? "Unit"}`
-                          : "-"}
-                      </TableCell>
-                      <TableCell className="text-right font-medium tabular-nums">
-                        {r.suggestedPrice ? (
-                          formatRupiah(r.suggestedPrice)
-                        ) : r.sourceType === "WEB" && r.sourceUrl ? (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={detailPendingUrl !== null}
-                            onClick={() => ambilDetail(i, r.sourceUrl!)}
-                            title="Baca harga & kontak dari halaman toko"
-                          >
-                            {detailPendingUrl === r.sourceUrl ? (
-                              <Spinner data-icon="inline-start" />
-                            ) : (
-                              <ScanSearch data-icon="inline-start" />
-                            )}
-                            Ambil detail
-                          </Button>
-                        ) : (
-                          "-"
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-              {hasMock && (
-                <p className="text-xs text-muted-foreground">
-                  Hasil web berlabel (mock) adalah data contoh. Untuk pencarian web
-                  nyata: set SOURCING_PROVIDER=firecrawl + FIRECRAWL_API_KEY di .env.
-                </p>
-              )}
-            </div>
-          ))}
+        <VendorSearchPanel />
       </DialogContent>
     </Dialog>
   );

@@ -479,7 +479,7 @@ model InquiryItem {
 }
 
 // ============================================================
-// SOURCING VENDOR (database vendor + hasil pencarian mock)
+// SOURCING VENDOR (pricelist internal + observasi web atau demo eksplisit)
 // ============================================================
 
 model Vendor {
@@ -527,7 +527,7 @@ model SourcingSearch {
   id             String   @id @default(cuid())
   organizationId String
   query          String
-  provider       String   @default("mock") // mock | firecrawl (nanti)
+  provider       String   @default("mock") // mock | firecrawl; service selalu mengisi secara eksplisit
   resultsJson    String // JSON string: kandidat vendor + harga indikatif
   inquiryItemId  String?
   createdById    String
@@ -544,7 +544,7 @@ model SourcingSearch {
 model AiLog {
   id             String   @id @default(cuid())
   organizationId String
-  kind           String // INQUIRY_EXTRACTION | PRODUCT_MATCH | VENDOR_SEARCH
+  kind           String // INQUIRY_EXTRACTION | PRODUCT_MATCH | VENDOR_SEARCH | VENDOR_DETAIL
   provider       String   @default("mock")
   inputSummary   String
   outputSummary  String
