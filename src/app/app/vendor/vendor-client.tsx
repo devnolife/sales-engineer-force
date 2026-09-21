@@ -7,11 +7,13 @@ import {
   Package,
   Pencil,
   Plus,
+  ScanSearch,
   Search,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
+  ambilDetailTokoAction,
   cariVendorAction,
   hapusProdukVendorAction,
   hapusVendorAction,
@@ -494,6 +496,36 @@ export function CariVendorDialog() {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [results, setResults] = useState<VendorSearchResult[] | null>(null);
+  const [detailPendingUrl, setDetailPendingUrl] = useState<string | null>(null);
+
+  function ambilDetail(index: number, url: string) {
+    setDetailPendingUrl(url);
+    startTransition(async () => {
+      const result = await ambilDetailTokoAction(url);
+      setDetailPendingUrl(null);
+      if (result.ok && result.data) {
+        const d = result.data;
+        setResults((prev) =>
+          prev
+            ? prev.map((r, i) =>
+              i === index
+                ? {
+                  ...r,
+                  price: d.price ?? r.price,
+                  suggestedPrice: d.suggestedPrice ?? r.suggestedPrice,
+                  contact: d.contact ?? r.contact,
+                }
+                : r,
+            )
+            : prev,
+        );
+        if (d.note) toast.info(d.note);
+        else toast.success("Detail halaman toko terbaca.");
+      } else if (!result.ok) {
+        toast.error(result.error);
+      }
+    });
+  }
 
   function onCari(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -516,15 +548,15 @@ export function CariVendorDialog() {
       <DialogTrigger asChild>
         <Button variant="outline">
           <Search data-icon="inline-start" />
-          Cari vendor (mock)
+          Cari vendor
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Cari vendor</DialogTitle>
           <DialogDescription>
-            Cari sumber harga modal: pricelist internal dicek lebih dulu, lalu hasil web
-            (mock). Minimal 3 karakter.
+            Cari sumber harga modal: pricelist internal dicek lebih dulu, lalu hasil web.
+            Minimal 3 karakter.
           </DialogDescription>
         </DialogHeader>
 
@@ -557,7 +589,8 @@ export function CariVendorDialog() {
                     <TableHead>Sumber</TableHead>
                     <TableHead>Vendor</TableHead>
                     <TableHead>Produk</TableHead>
-                    <TableHead className="text-right">Harga</TableHead>
+                    <TableHead className="text-right">Modal</TableHead>
+                    <TableHead className="text-right">Jual (+30%)</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -567,15 +600,30 @@ export function CariVendorDialog() {
                         <Badge
                           variant={r.sourceType === "INTERNAL" ? "secondary" : "outline"}
                         >
-                          {r.sourceType === "INTERNAL" ? "Internal" : "Web (mock)"}
+                          {r.sourceType === "INTERNAL"
+                            ? "Internal"
+                            : r.sourceType === "WEB"
+                              ? "Web"
+                              : "Web (mock)"}
                         </Badge>
                       </TableCell>
                       <TableCell className="max-w-48">
                         <div className="grid gap-0.5">
-                          <span className="truncate">{r.vendorName}</span>
-                          {r.city && (
+                          {r.sourceUrl ? (
+                            <a
+                              href={r.sourceUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="truncate underline-offset-4 hover:underline"
+                            >
+                              {r.vendorName}
+                            </a>
+                          ) : (
+                            <span className="truncate">{r.vendorName}</span>
+                          )}
+                          {(r.contact || r.city) && (
                             <span className="truncate text-xs text-muted-foreground">
-                              {r.city}
+                              {[r.city, r.contact].filter(Boolean).join(" · ")}
                             </span>
                           )}
                         </div>
@@ -588,14 +636,36 @@ export function CariVendorDialog() {
                           ? `${formatRupiah(r.price)}/${r.unit ?? "Unit"}`
                           : "-"}
                       </TableCell>
+                      <TableCell className="text-right font-medium tabular-nums">
+                        {r.suggestedPrice ? (
+                          formatRupiah(r.suggestedPrice)
+                        ) : r.sourceType === "WEB" && r.sourceUrl ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={detailPendingUrl !== null}
+                            onClick={() => ambilDetail(i, r.sourceUrl!)}
+                            title="Baca harga & kontak dari halaman toko"
+                          >
+                            {detailPendingUrl === r.sourceUrl ? (
+                              <Spinner data-icon="inline-start" />
+                            ) : (
+                              <ScanSearch data-icon="inline-start" />
+                            )}
+                            Ambil detail
+                          </Button>
+                        ) : (
+                          "-"
+                        )}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
               {hasMock && (
                 <p className="text-xs text-muted-foreground">
-                  Hasil web berlabel (mock) adalah data contoh — provider Firecrawl asli
-                  menyusul; harga bukan data nyata.
+                  Hasil web berlabel (mock) adalah data contoh. Untuk pencarian web
+                  nyata: set SOURCING_PROVIDER=firecrawl + FIRECRAWL_API_KEY di .env.
                 </p>
               )}
             </div>

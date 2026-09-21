@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Copy,
+  CopyPlus,
   FileEdit,
   GitBranchPlus,
   MessageCircle,
@@ -18,6 +19,7 @@ import {
 import { toast } from "sonner";
 import { toWaNumber } from "@/lib/format";
 import {
+  duplikatPenawaranAction,
   hapusPenawaranAction,
   revisiPenawaranAction,
   setStatusPenawaranAction,
@@ -47,6 +49,7 @@ import {
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
+import { EmailDialog } from "./email-dialog";
 
 interface QuotationActionsData {
   id: string;
@@ -57,6 +60,7 @@ interface QuotationActionsData {
   nomor: string;
   total: string;
   supersededByRevision: boolean;
+  pdfEnabled: boolean;
 }
 
 export function QuotationActions({ quotation }: { quotation: QuotationActionsData }) {
@@ -79,6 +83,30 @@ export function QuotationActions({ quotation }: { quotation: QuotationActionsDat
         router.refresh();
       } else {
         toast.error(result.error ?? "Gagal.");
+      }
+    });
+  }
+
+  async function unduhPdf() {
+    if (!quotation.pdfEnabled) {
+      window.print();
+      return;
+    }
+    startTransition(async () => {
+      try {
+        const res = await fetch(`/api/penawaran/${quotation.id}/pdf`);
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        const blob = await res.blob();
+        const disposition = res.headers.get("Content-Disposition") ?? "";
+        const match = /filename="([^"]+)"/.exec(disposition);
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = match?.[1] ?? "penawaran.pdf";
+        a.click();
+        URL.revokeObjectURL(a.href);
+      } catch {
+        toast.info("PDF server tidak tersedia — membuka print browser.");
+        window.print();
       }
     });
   }
@@ -153,12 +181,16 @@ export function QuotationActions({ quotation }: { quotation: QuotationActionsDat
 
         {!quotation.editable && (
           <>
-            <Button variant="outline" onClick={() => window.print()}>
+            <Button variant="outline" disabled={pending} onClick={unduhPdf}>
               <Printer data-icon="inline-start" />
               Unduh PDF
             </Button>
             {quotation.publicToken && (
               <>
+                <EmailDialog
+                  quotationId={quotation.id}
+                  pdfEnabled={quotation.pdfEnabled}
+                />
                 <Button variant="outline" onClick={copyLink}>
                   <Copy data-icon="inline-start" />
                   Salin tautan publik
@@ -187,6 +219,26 @@ export function QuotationActions({ quotation }: { quotation: QuotationActionsDat
             >
               <GitBranchPlus data-icon="inline-start" />
               Buat revisi
+            </Button>
+
+            <Button
+              variant="outline"
+              disabled={pending}
+              onClick={() =>
+                startTransition(async () => {
+                  const result = await duplikatPenawaranAction(quotation.id);
+                  if (result.ok && result.data) {
+                    toast.success("Penawaran diduplikasi sebagai draft baru.");
+                    router.push(`/app/penawaran/${result.data.id}/edit`);
+                    router.refresh();
+                  } else if (!result.ok) {
+                    toast.error(result.error);
+                  }
+                })
+              }
+            >
+              <CopyPlus data-icon="inline-start" />
+              Duplikat
             </Button>
 
             {!quotation.supersededByRevision && quotation.status === "SENT" && (

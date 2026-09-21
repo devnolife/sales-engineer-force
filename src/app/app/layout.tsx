@@ -25,12 +25,14 @@ export default async function AppLayout({
         isAdmin={ctx.role === "owner" || ctx.role === "admin"}
       />
       <SidebarInset>
-        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4 no-print">
+        <header className="flex h-14 shrink-0 items-center gap-2 border-b bg-card/60 px-4 backdrop-blur no-print">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mr-2 h-4" />
           <span className="text-sm text-muted-foreground">{org?.name}</span>
         </header>
-        <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">{children}</div>
+        <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 p-4 md:p-8">
+          {children}
+        </div>
       </SidebarInset>
     </SidebarProvider>
   );

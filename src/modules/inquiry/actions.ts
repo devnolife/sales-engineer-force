@@ -13,7 +13,6 @@ import {
   setInquiryCustomer,
   setInquiryItemMatch,
   updateInquiryItem,
-  type InquiryStatus,
 } from "./service";
 
 export type ActionResult<T = undefined> =
@@ -165,5 +164,3 @@ export async function hapusPermintaanAction(id: string): Promise<ActionResult> {
     return { ok: false, error: errMessage(e, "Gagal menghapus permintaan.") };
   }
 }
-
-export type { InquiryStatus };

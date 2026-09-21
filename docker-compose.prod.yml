@@ -1,0 +1,73 @@
+# Produksi (M7) — VPS aplikasi: Next.js + Postgres SAJA.
+# Service AI (core-ai + Gotenberg) berjalan di server TERPISAH
+# (repo https://github.com/devnolife/sales-engineer-ai, docker-compose.prod.yml di sana).
+#
+# Jalankan: docker compose -f docker-compose.prod.yml up -d
+# HTTPS: pasang reverse proxy (Caddy/nginx) di depan port 3000.
+#
+# WAJIB diisi via .env.production (tidak ada fallback hardcoded — pelajaran Metito):
+#   POSTGRES_PASSWORD, BETTER_AUTH_SECRET, BETTER_AUTH_URL, NEXT_PUBLIC_APP_URL,
+#   CRON_SECRET, CORE_AI_URL (URL server AI, mis. https://ai.domainmu.com),
+#   CORE_AI_API_KEY (samakan dengan server AI),
+#   (opsional) MAIL_PROVIDER/RESEND_API_KEY/MAIL_FROM
+#
+# Catatan PDF: Gotenberg di server AI mem-fetch halaman print aplikasi ini,
+# jadi INTERNAL_APP_URL harus URL yang bisa dijangkau dari server AI
+# (default: NEXT_PUBLIC_APP_URL). Route print tetap terlindungi print key.
+services:
+  # Sinkronisasi schema DB (jalankan manual saat deploy/upgrade):
+  #   docker compose -f docker-compose.prod.yml run --rm migrate
+  migrate:
+    build:
+      context: .
+      target: build
+    profiles: ["tools"]
+    environment:
+      DATABASE_URL: "postgresql://saleskit:${POSTGRES_PASSWORD:?wajib diisi}@db:5432/saleskit"
+    command: ["pnpm", "db:push:pg"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: "postgresql://saleskit:${POSTGRES_PASSWORD:?wajib diisi}@db:5432/saleskit"
+      BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:?wajib diisi}"
+      BETTER_AUTH_URL: "${BETTER_AUTH_URL:?wajib diisi}"
+      NEXT_PUBLIC_APP_URL: "${NEXT_PUBLIC_APP_URL:?wajib diisi}"
+      CRON_SECRET: "${CRON_SECRET:?wajib diisi}"
+      CORE_AI_URL: "${CORE_AI_URL:?wajib diisi — URL server AI}"
+      CORE_AI_API_KEY: "${CORE_AI_API_KEY:?wajib diisi — samakan dengan server AI}"
+      INTERNAL_APP_URL: "${INTERNAL_APP_URL:-${NEXT_PUBLIC_APP_URL}}"
+      PDF_CACHE_DIR: "/data/pdf"
+      MAIL_PROVIDER: "${MAIL_PROVIDER:-mock}"
+      RESEND_API_KEY: "${RESEND_API_KEY:-}"
+      MAIL_FROM: "${MAIL_FROM:-}"
+    volumes:
+      - pdf-cache:/data/pdf
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: saleskit
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?wajib diisi}"
+      POSTGRES_DB: saleskit
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U saleskit -d saleskit"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
+  pdf-cache:

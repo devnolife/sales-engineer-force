@@ -499,6 +499,63 @@ export async function reviseQuotation(scope: OrgScope, userId: string, id: strin
   return clone;
 }
 
+/**
+ * Duplikasi penawaran -> draft BARU yang berdiri sendiri (bukan revisi):
+ * tanpa parentId, tanpa nomor, tanpa deal — untuk penawaran serupa ke
+ * pelanggan sama/berbeda. Use case paling sering di lapangan.
+ */
+export async function duplicateQuotation(scope: OrgScope, userId: string, id: string) {
+  const source = await scope.db.quotation.findFirst({
+    where: { id },
+    include: { items: { orderBy: { lineNo: "asc" } } },
+  });
+  if (!source) throw new QuotationError("Penawaran tidak ditemukan.", 404);
+
+  return scope.db.quotation.create({
+    data: {
+      organizationId: scope.orgId,
+      status: "DRAFT",
+      customerId: source.customerId,
+      revision: 0,
+      quoteDate: new Date(),
+      customerName: source.customerName,
+      attn: source.attn,
+      subject: `${source.subject} (salinan)`,
+      franco: source.franco,
+      deliveryTime: source.deliveryTime,
+      termsOfPayment: source.termsOfPayment,
+      priceIncludeNote: source.priceIncludeNote,
+      validityDays: source.validityDays,
+      vatRate: source.vatRate,
+      docDiscountType: source.docDiscountType,
+      docDiscountValue: source.docDiscountValue,
+      subtotal: source.subtotal,
+      discountAmount: source.discountAmount,
+      vatAmount: source.vatAmount,
+      total: source.total,
+      amountInWords: source.amountInWords,
+      notes: source.notes,
+      createdById: userId,
+      items: {
+        create: source.items.map((item) => ({
+          organizationId: scope.orgId,
+          lineNo: item.lineNo,
+          productId: item.productId,
+          name: item.name,
+          brand: item.brand,
+          type: item.type,
+          spec: item.spec,
+          qty: item.qty,
+          unit: item.unit,
+          unitPrice: item.unitPrice,
+          discountPercent: item.discountPercent,
+          lineTotal: item.lineTotal,
+        })),
+      },
+    },
+  });
+}
+
 // ---------- Status (WON / LOST / kembali SENT) ----------
 
 export async function setQuotationStatus(
@@ -562,12 +619,12 @@ export async function listQuotations(scope: OrgScope, filter: QuotationListFilte
   const where: Prisma.QuotationWhereInput = {
     ...(search
       ? {
-          OR: [
-            { numberBase: { contains: search } },
-            { customerName: { contains: search } },
-            { subject: { contains: search } },
-          ],
-        }
+        OR: [
+          { numberBase: { contains: search } },
+          { customerName: { contains: search } },
+          { subject: { contains: search } },
+        ],
+      }
       : {}),
     ...(year
       ? { quoteDate: { gte: new Date(year, 0, 1), lt: new Date(year + 1, 0, 1) } }

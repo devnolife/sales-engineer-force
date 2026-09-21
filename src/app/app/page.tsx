@@ -3,6 +3,7 @@ import { Decimal } from "decimal.js";
 import { requireOrgContext } from "@/lib/org-context";
 import { formatRupiah, formatTanggal } from "@/lib/format";
 import { listDueReminders, STAGE_LABEL, type DealStage } from "@/modules/pipeline/service";
+import { getFollowUpSignals, type FollowUpKind } from "@/modules/pipeline/follow-up";
 import { displayNumber } from "@/modules/quotation/service";
 import {
   displayStatus,
@@ -19,6 +20,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { MonthlyTrendChart, PipelineFunnelChart } from "./dashboard-charts";
 
 export const metadata = { title: "Dashboard" };
 
@@ -32,25 +34,42 @@ export default async function DashboardPage() {
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const in7Days = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-  const [deals, quotationsThisMonth, decidedQuotations, expiringSoon, dueReminders, recentQuotations] =
+  // Scope per-role (M6): owner/admin lihat semua; sales (member) lihat miliknya.
+  const salesOnly = ctx.role === "member";
+  const dealScope = salesOnly ? { ownerId: ctx.userId } : {};
+  const quotationScope = salesOnly ? { createdById: ctx.userId } : {};
+
+  const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+
+  const [deals, quotationsThisMonth, decidedQuotations, expiringSoon, dueReminders, followUpSignals, issuedLast6Months, recentQuotations] =
     await Promise.all([
       ctx.db.deal.findMany({
-        where: { stage: { notIn: ["WON", "LOST"] } },
+        where: { stage: { notIn: ["WON", "LOST"] }, ...dealScope },
         select: { stage: true, value: true },
       }),
       ctx.db.quotation.findMany({
-        where: { issuedAt: { gte: startOfMonth } },
+        where: { issuedAt: { gte: startOfMonth }, ...quotationScope },
         select: { total: true },
       }),
       ctx.db.quotation.findMany({
-        where: { status: { in: ["WON", "LOST"] } },
+        where: { status: { in: ["WON", "LOST"] }, ...quotationScope },
         select: { status: true },
       }),
       ctx.db.quotation.count({
-        where: { status: "SENT", validUntil: { gte: now, lte: in7Days } },
+        where: {
+          status: "SENT",
+          validUntil: { gte: now, lte: in7Days },
+          ...quotationScope,
+        },
       }),
-      listDueReminders(ctx, 5),
+      listDueReminders(ctx, 5, salesOnly ? ctx.userId : undefined),
+      getFollowUpSignals(ctx, { forUserId: salesOnly ? ctx.userId : undefined }),
       ctx.db.quotation.findMany({
+        where: { issuedAt: { gte: sixMonthsAgo }, ...quotationScope },
+        select: { issuedAt: true, total: true },
+      }),
+      ctx.db.quotation.findMany({
+        where: quotationScope,
         orderBy: { createdAt: "desc" },
         take: 5,
         select: {
@@ -84,34 +103,63 @@ export default async function DashboardPage() {
 
   const monthTotal = sum(quotationsThisMonth.map((q) => q.total));
 
+  // Tren 6 bulan terakhir (nilai & jumlah penawaran terbit per bulan)
+  const MONTH_LABEL = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+  const trendData = Array.from({ length: 6 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - 5 + i, 1);
+    return { key: `${d.getFullYear()}-${d.getMonth()}`, label: MONTH_LABEL[d.getMonth()]!, total: 0, count: 0 };
+  });
+  const trendByKey = new Map(trendData.map((t) => [t.key, t]));
+  for (const q of issuedLast6Months) {
+    if (!q.issuedAt) continue;
+    const key = `${q.issuedAt.getFullYear()}-${q.issuedAt.getMonth()}`;
+    const bucket = trendByKey.get(key);
+    if (bucket) {
+      bucket.total += Number(q.total) || 0;
+      bucket.count += 1;
+    }
+  }
+
+  const funnelData = (["LEAD", "QUOTED", "NEGOTIATION"] as DealStage[]).map((stage) => ({
+    label: STAGE_LABEL[stage],
+    count: pipelineByStage.get(stage)?.count ?? 0,
+    value: Number((pipelineByStage.get(stage)?.value ?? new Decimal(0)).toFixed(0)),
+  }));
+
   return (
     <>
       <PageHeader
         title="Dashboard"
-        description="Ringkasan pipeline, penawaran, dan follow-up organisasi Anda."
+        description={
+          salesOnly
+            ? "Ringkasan pipeline, penawaran, dan follow-up milik Anda."
+            : "Ringkasan pipeline, penawaran, dan follow-up organisasi Anda."
+        }
       >
         <Button asChild>
           <Link href="/app/penawaran/baru">Buat penawaran</Link>
         </Button>
       </PageHeader>
 
-      {/* Kartu ringkasan */}
+      {/* Kartu ringkasan — kartu pertama = KPI utama, dibedakan dengan latar petrol */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Card>
+        <Card className="border-0 bg-primary text-primary-foreground shadow-md">
           <CardHeader>
-            <CardDescription>Nilai pipeline aktif</CardDescription>
-            <CardTitle className="text-2xl tabular-nums">
+            <CardDescription className="text-primary-foreground/70">
+              Nilai pipeline aktif
+            </CardDescription>
+            <CardTitle className="text-3xl tabular-nums tracking-tight">
               {formatRupiah(totalPipeline.toFixed(0))}
             </CardTitle>
           </CardHeader>
-          <CardContent className="text-xs text-muted-foreground">
+          <CardContent className="text-xs text-primary-foreground/70">
             {deals.length} deal berjalan (belum menang/kalah)
           </CardContent>
         </Card>
         <Card>
           <CardHeader>
             <CardDescription>Penawaran terbit bulan ini</CardDescription>
-            <CardTitle className="text-2xl tabular-nums">
+            <CardTitle className="text-3xl tabular-nums tracking-tight">
               {quotationsThisMonth.length}
             </CardTitle>
           </CardHeader>
@@ -122,7 +170,7 @@ export default async function DashboardPage() {
         <Card>
           <CardHeader>
             <CardDescription>Win rate</CardDescription>
-            <CardTitle className="text-2xl tabular-nums">
+            <CardTitle className="text-3xl tabular-nums tracking-tight">
               {winRate === null ? "—" : `${winRate}%`}
             </CardTitle>
           </CardHeader>
@@ -132,13 +180,37 @@ export default async function DashboardPage() {
               : `${wonCount} menang dari ${decidedQuotations.length} yang diputuskan`}
           </CardContent>
         </Card>
-        <Card>
+        <Card className={expiringSoon > 0 ? "border-chart-2/50" : undefined}>
           <CardHeader>
             <CardDescription>Akan kedaluwarsa ≤ 7 hari</CardDescription>
-            <CardTitle className="text-2xl tabular-nums">{expiringSoon}</CardTitle>
+            <CardTitle className="text-3xl tabular-nums tracking-tight">
+              {expiringSoon}
+            </CardTitle>
           </CardHeader>
           <CardContent className="text-xs text-muted-foreground">
             Penawaran terkirim yang butuh follow-up segera
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Grafik: tren penawaran & funnel pipeline */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Tren penawaran terbit</CardTitle>
+            <CardDescription>Nilai penawaran terbit per bulan, 6 bulan terakhir.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <MonthlyTrendChart data={trendData} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Funnel pipeline</CardTitle>
+            <CardDescription>Jumlah deal aktif per tahap.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <PipelineFunnelChart data={funnelData} />
           </CardContent>
         </Card>
       </div>
@@ -199,11 +271,10 @@ export default async function DashboardPage() {
                     </span>
                   </span>
                   <span
-                    className={`shrink-0 text-xs tabular-nums ${
-                      r.dueAt.getTime() < now.getTime()
-                        ? "font-medium text-destructive"
-                        : "text-muted-foreground"
-                    }`}
+                    className={`shrink-0 text-xs tabular-nums ${r.dueAt.getTime() < now.getTime()
+                      ? "font-medium text-destructive"
+                      : "text-muted-foreground"
+                      }`}
                   >
                     {formatTanggal(r.dueAt)}
                   </span>
@@ -213,6 +284,50 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Sinyal follow-up pintar — dari view tracking penawaran */}
+      {followUpSignals.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Sinyal follow-up</CardTitle>
+            <CardDescription>
+              Dibaca dari aktivitas pelanggan pada tautan penawaran — prioritaskan yang panas.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            {followUpSignals.map((s) => {
+              const badge: Record<FollowUpKind, { label: string; variant: "default" | "secondary" | "destructive" }> = {
+                HOT: { label: "🔥 Panas", variant: "default" },
+                VIEWED: { label: "Dilihat", variant: "secondary" },
+                STALE: { label: "Belum dibuka", variant: "destructive" },
+              };
+              const b = badge[s.kind];
+              return (
+                <Link
+                  key={s.quotationId}
+                  href={`/app/penawaran/${s.quotationId}`}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 hover:bg-accent"
+                >
+                  <span className="min-w-0">
+                    <span className="flex items-center gap-2 text-sm font-medium">
+                      <Badge variant={b.variant}>{b.label}</Badge>
+                      <span className="truncate">
+                        {s.nomor ? displayNumber(s.nomor, s.revision) : "(Draft)"} — {s.customerName}
+                      </span>
+                    </span>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {s.hint}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-sm tabular-nums">
+                    {formatRupiah(s.total)}
+                  </span>
+                </Link>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Penawaran terbaru */}
       <Card>

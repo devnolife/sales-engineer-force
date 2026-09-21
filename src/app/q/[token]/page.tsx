@@ -4,6 +4,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { PrintButton } from "@/components/quotations/print-button";
 import { QuotationDocument } from "@/components/quotations/quotation-document";
 import { RecordView } from "@/components/quotations/record-view";
+import { isPdfEnabled } from "@/modules/pdf/service";
 import { toDocumentProps } from "@/modules/quotation/document-data";
 import { displayStatus } from "@/modules/quotation/lib/quotation-status";
 import { getPublicQuotation } from "@/modules/quotation/service";
@@ -61,7 +62,7 @@ export default async function PublicQuotationPage({
           </Alert>
         )}
         <div className="flex justify-end no-print">
-          <PrintButton />
+          <PrintButton pdfHref={isPdfEnabled() ? `/api/q/${token}/pdf` : undefined} />
         </div>
         <QuotationDocument {...props} />
       </div>

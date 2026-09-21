@@ -488,7 +488,7 @@ function ItemVendorSearch({
           <DialogHeader>
             <DialogTitle>Cari vendor: {defaultQuery}</DialogTitle>
             <DialogDescription>
-              Urutan sumber: pricelist internal dulu (paling akurat), lalu web (mock).
+              Urutan sumber: pricelist internal dulu (paling akurat), lalu web.
             </DialogDescription>
           </DialogHeader>
           <div className="flex gap-2">
@@ -522,7 +522,8 @@ function ItemVendorSearch({
                       <TableHead>Sumber</TableHead>
                       <TableHead>Vendor</TableHead>
                       <TableHead>Produk</TableHead>
-                      <TableHead className="text-right">Harga indikatif</TableHead>
+                      <TableHead className="text-right">Modal</TableHead>
+                      <TableHead className="text-right">Jual (+30%)</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -532,20 +533,40 @@ function ItemVendorSearch({
                           <Badge
                             variant={r.sourceType === "INTERNAL" ? "secondary" : "outline"}
                           >
-                            {r.sourceType === "INTERNAL" ? "Internal" : "Web (mock)"}
+                            {r.sourceType === "INTERNAL"
+                              ? "Internal"
+                              : r.sourceType === "WEB"
+                                ? "Web"
+                                : "Web (mock)"}
                           </Badge>
                         </TableCell>
                         <TableCell>
                           <div className="grid gap-0.5">
-                            <span>{r.vendorName}</span>
-                            {r.city && (
-                              <span className="text-xs text-muted-foreground">{r.city}</span>
+                            {r.sourceUrl ? (
+                              <a
+                                href={r.sourceUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="underline-offset-4 hover:underline"
+                              >
+                                {r.vendorName}
+                              </a>
+                            ) : (
+                              <span>{r.vendorName}</span>
+                            )}
+                            {(r.contact || r.city) && (
+                              <span className="text-xs text-muted-foreground">
+                                {[r.city, r.contact].filter(Boolean).join(" · ")}
+                              </span>
                             )}
                           </div>
                         </TableCell>
                         <TableCell className="max-w-48 truncate">{r.productName}</TableCell>
                         <TableCell className="text-right tabular-nums">
                           {r.price ? `${formatRupiah(r.price)}/${r.unit ?? "Unit"}` : "-"}
+                        </TableCell>
+                        <TableCell className="text-right font-medium tabular-nums">
+                          {r.suggestedPrice ? formatRupiah(r.suggestedPrice) : "-"}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -554,8 +575,8 @@ function ItemVendorSearch({
               )}
               {adaWebMock && (
                 <p className="text-xs text-muted-foreground">
-                  Hasil berlabel (mock) adalah data contoh — bukan harga nyata. Provider
-                  web asli (Firecrawl) dipasang belakangan lewat interface yang sama.
+                  Hasil berlabel (mock) adalah data contoh — bukan harga nyata. Aktifkan
+                  pencarian nyata: SOURCING_PROVIDER=firecrawl + FIRECRAWL_API_KEY di .env.
                 </p>
               )}
             </div>

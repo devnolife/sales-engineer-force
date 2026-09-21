@@ -9,12 +9,16 @@
 export interface VendorSearchResult {
   vendorName: string;
   productName: string;
-  /** Harga indikatif (string desimal) — bisa kosong bila tidak tersedia. */
+  /** Harga modal indikatif (string desimal) — bisa kosong bila tidak tersedia. */
   price?: string;
+  /** Harga jual saran = modal + margin default (mis. 30%). */
+  suggestedPrice?: string;
   unit?: string;
   city?: string;
-  sourceType: "INTERNAL" | "WEB_MOCK";
-  sourceLabel: string; // mis. "Pricelist internal", "Marketplace (mock)"
+  /** Kontak penjual/vendor (telepon · email) bila tersedia. */
+  contact?: string;
+  sourceType: "INTERNAL" | "WEB" | "WEB_MOCK";
+  sourceLabel: string; // mis. "Pricelist internal", "Web (Firecrawl)", "Marketplace (mock)"
   sourceUrl?: string;
   note?: string;
 }
