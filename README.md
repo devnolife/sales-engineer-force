@@ -85,6 +85,46 @@ atau variabel `NEXT_PUBLIC_*`.
 | core-ai | `SOURCING_PROVIDER=firecrawl`, `FIRECRAWL_API_KEY`, `CORE_AI_API_KEY` untuk autentikasi antar-layanan |
 | Demo SalesKit | `SOURCING_MODE=mock`; sourcing memakai contoh lokal berlabel, tidak membutuhkan Firecrawl |
 
+Untuk setup lokal dua checkout di atas, jalankan dari folder SalesKit:
+
+```bash
+pnpm setup:firecrawl
+```
+
+Tempel API key Firecrawl pada prompt terminal; karakter tidak ditampilkan dan
+key tidak dimasukkan ke argumen/history perintah. Jangan kirim key melalui chat.
+Skrip menggunakan Node bawaan (Node 22+), tanpa memasang paket atau menghubungi
+Cloud. Ini hanya menyiapkan konfigurasi, bukan installer, deployment, aktivasi
+langganan, atau validasi key terhadap API.
+
+Skrip membuat `.env` dari example bila belum ada, menyimpan key Firecrawl hanya
+di `../core-ai/.env`, mengaktifkan sourcing live di `.env` SalesKit, dan memakai
+URL loopback sesuai `PORT` backend. `CORE_AI_API_KEY` yang sudah ada dipakai
+bersama; jika keduanya kosong, dibuat key acak. Auth/cron secret acak juga dibuat
+untuk `.env` aplikasi yang baru. Nilai lain, termasuk database, model AI, dan
+margin yang sudah ada, dipertahankan. Tidak ada perubahan atau seed database.
+
+Kedua `.env` ditulis dengan izin `0600`, memakai blok bertanda
+`BEGIN/END SalesKit Firecrawl setup`; blok paling akhir menggantikan nilai
+terdahulu pada file yang sama. Jalankan ulang perintah untuk mengganti key,
+bukan menambahkan key di luar blok tersebut. Penulisan file memakai rename
+atomic; bila salah satu penulisan gagal, perubahan sebelumnya dipulihkan atau
+kegagalan pemulihan dilaporkan secara eksplisit.
+
+Untuk mencegah konfigurasi yang seolah berhasil tetapi tidak digunakan, skrip
+berhenti tanpa menyimpan jika mendeteksi key antar-layanan berbeda, backend
+remote, symlink `.env`, atau override sourcing pada environment terminal/
+`.env.local`/file khusus development atau production. Selesaikan konflik yang
+disebutkan dahulu. Key Firecrawl tidak boleh dipakai ulang sebagai key
+antar-layanan, dan kedua key tidak boleh diekspos lewat `NEXT_PUBLIC_*`.
+Konfigurasi remote/produksi tetap dilakukan di environment
+proses masing-masing, bukan dengan skrip lokal ini.
+
+Setelah setup, **restart kedua layanan** dengan perintah di bawah. Jika ini
+checkout baru, siapkan dependency/database menggunakan quickstart demo lokal
+terlebih dahulu. Panggilan Cloud baru terjadi saat pengguna memilih pencarian
+atau detail pada aplikasi, dan memakai kredit akun Firecrawl.
+
 Jalankan `pnpm dev:ai` di terminal lain, lalu `pnpm dev`. Alternatifnya,
 `docker compose up -d core-ai gotenberg` membaca `../core-ai/.env`, bukan
 mengambil provider/key dari `.env` aplikasi. Untuk Ollama di host saat memakai
